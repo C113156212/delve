@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DELVE</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0f;
+      color: #e0ddd5;
+      font-family: 'Courier New', monospace;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── 畫面容器 ── */
+    .screen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      width: 360px;
+      padding: 0 16px;
+    }
+    .screen.active { display: flex; }
+
+    /* ── 標題 ── */
+    .game-title {
+      font-size: 52px;
+      letter-spacing: 0.25em;
+      color: #1D9E75;
+      margin-bottom: 4px;
+    }
+    .game-sub {
+      font-size: 11px;
+      color: #333;
+      letter-spacing: 0.12em;
+      margin-bottom: 20px;
+    }
+
+    /* ── 輸入框 ── */
+    input {
+      width: 100%;
+      padding: 11px 14px;
+      background: #0f0f14;
+      border: 1px solid #222;
+      color: #e0ddd5;
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: #1D9E75; }
+    input::placeholder { color: #2a2a2a; }
+
+    /* ── 按鈕 ── */
+    button {
+      width: 100%;
+      padding: 11px 14px;
+      background: transparent;
+      border: 1px solid #2a2a2a;
+      color: #888;
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      letter-spacing: 0.06em;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    button:hover:not(:disabled) { border-color: #555; color: #e0ddd5; }
+    button:disabled { opacity: 0.25; cursor: default; }
+    button.primary {
+      border-color: #1D9E75;
+      color: #1D9E75;
+    }
+    button.primary:hover:not(:disabled) {
+      background: #1D9E75;
+      color: #04342C;
+    }
+
+    /* ── 分隔線 ── */
+    .sep {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #222;
+      font-size: 11px;
+    }
+    .sep::before, .sep::after {
+      content: '';
+      flex: 1;
+      border-top: 1px solid #1a1a1a;
+    }
+
+    /* ── 錯誤 / 提示 ── */
+    .error { font-size: 12px; color: #D85A30; min-height: 18px; text-align: center; }
+    .hint  { font-size: 11px; color: #333; text-align: center; line-height: 1.7; }
+
+    /* ── 房間代碼大字 ── */
+    .room-code-display {
+      width: 100%;
+      text-align: center;
+      font-size: 40px;
+      letter-spacing: 0.35em;
+      color: #1D9E75;
+      border: 1px solid #1a3d2e;
+      padding: 14px 0;
+      background: #060e0a;
+    }
+    .room-code-label {
+      font-size: 10px;
+      color: #2a4a3a;
+      letter-spacing: 0.15em;
+      margin-bottom: 4px;
+    }
+
+    /* ── 職業選擇格 ── */
+    .role-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      width: 100%;
+    }
+    .role-btn {
+      padding: 16px 10px 12px;
+      border: 1px solid #1a1a1a;
+      background: #0d0d12;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+      user-select: none;
+    }
+    .role-btn:hover:not(.taken) { border-color: #333; background: #111118; }
+    .role-btn.selected  { border-color: #1D9E75; background: #060e0a; }
+    .role-btn.taken     { opacity: 0.25; cursor: not-allowed; }
+    .role-icon { font-size: 22px; margin-bottom: 6px; display: block; color: #e0ddd5; }
+    .role-name { font-size: 13px; color: #ccc; display: block; margin-bottom: 3px; }
+    .role-desc { font-size: 10px; color: #444; display: block; line-height: 1.5; }
+
+    /* ── 玩家列表 ── */
+    .player-list { width: 100%; display: flex; flex-direction: column; gap: 5px; }
+    .player-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: #0d0d12;
+      border: 1px solid #161616;
+      font-size: 12px;
+    }
+    .p-name { color: #aaa; }
+    .p-host { color: #BA7517; font-size: 10px; margin-left: 4px; }
+    .p-role {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 2px;
+      letter-spacing: 0.05em;
+    }
+    .p-role.scout     { background: #0a2018; color: #1D9E75; }
+    .p-role.fighter   { background: #1a0a06; color: #D85A30; }
+    .p-role.scholar   { background: #1a1206; color: #BA7517; }
+    .p-role.architect { background: #0e0c1a; color: #7F77DD; }
+    .p-role.none      { color: #333; }
+  </style>
+</head>
+<body>
+
+<!-- ══ 畫面 1：輸入名字 ══ -->
+<div class="screen active" id="screen-name">
+  <div class="game-title">DELVE</div>
+  <div class="game-sub">四人合作 · 資訊差 · 即時溝通</div>
+  <input id="inp-name" placeholder="輸入你的名字" maxlength="12" autocomplete="off">
+  <button class="primary" onclick="submitName()">進入遊戲</button>
+  <div class="error" id="err-name"></div>
+</div>
+
+<!-- ══ 畫面 2：建立 / 加入 ══ -->
+<div class="screen" id="screen-lobby">
+  <div class="game-title">DELVE</div>
+  <button class="primary" onclick="doCreateRoom()">建立新房間</button>
+  <div class="sep">或</div>
+  <input id="inp-code" placeholder="輸入房間代碼" maxlength="4"
+    style="text-align:center;font-size:22px;letter-spacing:0.25em;text-transform:uppercase">
+  <button onclick="doJoinRoom()">加入房間</button>
+  <div class="error" id="err-lobby"></div>
+</div>
+
+<!-- ══ 畫面 3：等待室 ══ -->
+<div class="screen" id="screen-room">
+  <div class="room-code-label">房間代碼</div>
+  <div class="room-code-display" id="disp-code">----</div>
+
+  <div class="role-grid">
+    <div class="role-btn" id="rbtn-scout" onclick="doPickRole('scout')">
+      <span class="role-icon">▲</span>
+      <span class="role-name">斥候</span>
+      <span class="role-desc">地圖・出口・預警</span>
+    </div>
+    <div class="role-btn" id="rbtn-fighter" onclick="doPickRole('fighter')">
+      <span class="role-icon">■</span>
+      <span class="role-name">戰士</span>
+      <span class="role-desc">攻擊・視野・站位</span>
+    </div>
+    <div class="role-btn" id="rbtn-scholar" onclick="doPickRole('scholar')">
+      <span class="role-icon">●</span>
+      <span class="role-name">學者</span>
+      <span class="role-desc">詞條・謎題・播報</span>
+    </div>
+    <div class="role-btn" id="rbtn-architect" onclick="doPickRole('architect')">
+      <span class="role-icon">◆</span>
+      <span class="role-name">建築師</span>
+      <span class="role-desc">地形・陷阱・控場</span>
+    </div>
+  </div>
+
+  <div class="player-list" id="player-list"></div>
+
+  <button class="primary" id="btn-start" onclick="doStartGame()" disabled>
+    等待所有人選擇職業...
+  </button>
+  <div class="error" id="err-room"></div>
+  <div class="hint">★ 為房主 · 所有人選完職業後房主可開始</div>
+</div>
+
+<!-- ══ 畫面 4：遊戲中（placeholder）══ -->
+<div class="screen" id="screen-game">
+  <div class="game-title" style="font-size:32px">載入中...</div>
+  <div class="hint" id="game-role-hint"></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ── 狀態 ─────────────────────────────────────────────────────────────────────
+var myName   = '';
+var myRole   = null;
+var roomCode = null;
+var isHost   = false;
+var socket   = io();
+
+var ROLE_LABELS = {
+  scout: '斥候', fighter: '戰士', scholar: '學者', architect: '建築師',
+};
+
+// ── 畫面切換 ─────────────────────────────────────────────────────────────────
+function show(id) {
+  document.querySelectorAll('.screen').forEach(function(s) {
+    s.classList.remove('active');
+  });
+  document.getElementById(id).classList.add('active');
+}
+
+function setErr(id, msg) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = msg || '';
+}
+
+// ── 畫面 1 ───────────────────────────────────────────────────────────────────
+document.getElementById('inp-name').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitName();
+});
+
+function submitName() {
+  var val = document.getElementById('inp-name').value.trim();
+  if (!val) { setErr('err-name', '請輸入名字'); return; }
+  myName = val;
+  setErr('err-name', '');
+  show('screen-lobby');
+}
+
+// ── 畫面 2 ───────────────────────────────────────────────────────────────────
+document.getElementById('inp-code').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doJoinRoom();
+});
+
+function doCreateRoom() {
+  setErr('err-lobby', '');
+  socket.emit('create_room', { name: myName });
+}
+
+function doJoinRoom() {
+  var code = document.getElementById('inp-code').value.trim().toUpperCase();
+  if (code.length !== 4) { setErr('err-lobby', '房間代碼是 4 個字元'); return; }
+  setErr('err-lobby', '');
+  socket.emit('join_room', { name: myName, code: code });
+}
+
+// ── 畫面 3 ───────────────────────────────────────────────────────────────────
+function doPickRole(role) {
+  if (!roomCode) return;
+  socket.emit('pick_role', { role: role });
+}
+
+function doStartGame() {
+  if (!isHost) return;
+  socket.emit('start_game');
+}
+
+function renderRoom(room) {
+  // 更新代碼顯示
+  document.getElementById('disp-code').textContent = room.code;
+
+  // 計算哪些職業被選走
+  var taken = {};
+  room.players.forEach(function(p) { if (p.role) taken[p.role] = p.id; });
+
+  // 更新職業按鈕
+  ['scout','fighter','scholar','architect'].forEach(function(role) {
+    var btn = document.getElementById('rbtn-' + role);
+    if (!btn) return;
+    var isMine   = myRole === role;
+    var takenOther = taken[role] && !isMine;
+    btn.classList.toggle('selected', isMine);
+    btn.classList.toggle('taken',    takenOther);
+  });
+
+  // 玩家列表
+  var html = room.players.map(function(p) {
+    var isH    = p.id === room.hostId;
+    var rLabel = p.role ? ROLE_LABELS[p.role] : '未選擇';
+    var rClass = p.role ? p.role : 'none';
+    return '<div class="player-row">'
+      + '<span class="p-name">' + p.name + (isH ? '<span class="p-host">★</span>' : '') + '</span>'
+      + '<span class="p-role ' + rClass + '">' + rLabel + '</span>'
+      + '</div>';
+  }).join('');
+  document.getElementById('player-list').innerHTML = html;
+
+  // 開始按鈕
+  var allPicked   = room.players.every(function(p) { return p.role !== null; });
+  var enough      = room.players.length >= 2;
+  var btnStart    = document.getElementById('btn-start');
+  btnStart.disabled = !(isHost && allPicked && enough);
+  if (!enough)         btnStart.textContent = '等待更多玩家加入...';
+  else if (!allPicked) btnStart.textContent = '等待所有人選擇職業...';
+  else if (!isHost)    btnStart.textContent = '等待房主開始...';
+  else                 btnStart.textContent = '開始遊戲 ▶';
+}
+
+// ── Socket 事件 ───────────────────────────────────────────────────────────────
+socket.on('room_created', function(data) {
+  roomCode = data.code;
+  isHost   = true;
+  show('screen-room');
+  renderRoom(data.room);
+});
+
+socket.on('room_joined', function(data) {
+  roomCode = data.code;
+  isHost   = false;
+  show('screen-room');
+  renderRoom(data.room);
+});
+
+socket.on('room_updated', function(data) {
+  renderRoom(data.room);
+});
+
+socket.on('role_confirmed', function(data) {
+  myRole = data.role;
+  renderRoom(data.room);
+});
+
+socket.on('game_start', function(data) {
+  show('screen-game');
+  document.getElementById('game-role-hint').textContent =
+    '你的職業：' + (ROLE_LABELS[myRole] || myRole);
+  // 之後這裡載入 Phaser 遊戲場景
+});
+
+socket.on('error_msg', function(data) {
+  setErr('err-lobby', data.msg);
+  setErr('err-room',  data.msg);
+});
+</script>
+
+</body>
+</html>
