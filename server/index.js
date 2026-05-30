@@ -149,11 +149,11 @@ io.on('connection', (socket) => {
 
   // ── Turn submission (replaces player_move + player_attack) ───────────────
 
-  socket.on('player_submit', ({ dx, dy, combatAction }) => {
+  socket.on('player_submit', ({ dx, dy, combatAction, targetId }) => {
     const code = socket.data.code;
     const gs   = gameStates.get(code);
     if (!gs || gs.phase !== 'playing') return;
-    submitPlayerAction(gs, socket.id, dx, dy, combatAction);
+    submitPlayerAction(gs, socket.id, dx, dy, combatAction, targetId ?? null);
   });
 
   // ── Architect wall (free action, not turn-gated) ──────────────────────────

@@ -219,7 +219,15 @@ function _nearest(m, players) {
 function dist(ax,ay,bx,by){ return Math.abs(ax-bx)+Math.abs(ay-by); }
 
 function _playerDmg(player) {
-  return player.role==='fighter' ? 35 : 20;
+  return {fighter:35, scout:18, architect:20, scholar:15}[player.role] || 20;
+}
+
+function _playerRange(player) {
+  return {fighter:1, scout:5, architect:3, scholar:1}[player.role] || 1;
+}
+
+function _isRanged(player) {
+  return player.role==='scout' || player.role==='architect';
 }
 
 // ── RNG ───────────────────────────────────────────────────────────────────────
@@ -300,7 +308,8 @@ function _makeMonster(id, pos, monsterType, baseHp) {
   const def=MONSTER_DEFS[monsterType]||MONSTER_DEFS.basic;
   const hp=Math.round(baseHp*def.hpMult);
   return {id,monsterType,label:def.symbol+(id+1),x:pos.x,y:pos.y,hp,maxHp:hp,
-    stance:null,nextTarget:null,rushMove2:false,slowUntil:0};
+    stance:null,nextTarget:null,rushMove2:false,slowUntil:0,
+    vulnerable:0,stanceRevealUntil:0};
 }
 
 function _spawnMonsters(grid,W,H,exitX,exitY,params,idStart){
@@ -449,6 +458,9 @@ function startTurn(gs) {
   if(gs.pressurePlates) _tickPuzzle(gs);
   if(gs.levelType==='boss') _tickBossExit(gs);
 
+  // Decrement vulnerable status
+  for(const m of gs.monsters) if(m.vulnerable>0) m.vulnerable--;
+
   const now=Date.now(), alivePlayers=Object.values(gs.players).filter(p=>p.hp>0);
   if(!alivePlayers.length) return;
 
@@ -522,33 +534,40 @@ function resolveTurn(gs) {
   }
 
   // ── Step 3: Resolve combat for each player ────────────────────────────────
+  const isSoloGame=Object.keys(gs.players).length===1;
   for(const p of alivePlayers){
     if(p.hp<=0) continue;
     const sub=gs.pendingActions[p.id];
     const combatAction=sub?.combatAction||null;
+    const effectiveAction=(p.role==='scholar'&&!isSoloGame)?'架':combatAction;
+
+    // Ranged attack (scout / architect with target selected)
+    if(_isRanged(p)&&sub?.targetId!=null){
+      _resolvePlayerRanged(p,sub.targetId,effectiveAction,gs,now);
+      for(const m of gs.monsters){
+        if(m.hp<=0||m.stance!=='射'||m.monsterType!=='archer') continue;
+        _resolveArcherShot(p,m,effectiveAction,gs,now);
+      }
+      continue;
+    }
 
     for(const m of gs.monsters){
       if(m.hp<=0) continue;
       const d=dist(p.x,p.y,m.x,m.y);
 
-      // Archer shot (range)
       if(m.stance==='射'&&m.monsterType==='archer'){
-        _resolveArcherShot(p,m,combatAction,gs,now); continue;
+        _resolveArcherShot(p,m,effectiveAction,gs,now); continue;
       }
+      if(m.stance==='全彈'&&m.monsterType==='boss') continue;
 
-      // Boss bullet hell
-      if(m.stance==='全彈'&&m.monsterType==='boss'){
-        // Already handled in _fireBulletHell; skip per-player here
-        continue;
-      }
-
-      // Melee (adjacent)
       if(d<=1&&m.stance&&m.stance!=='移'){
-        _resolveMelee(p,m,combatAction,gs,now);
-      } else if(d<=1&&m.stance==='移'&&combatAction){
-        const dmg=_playerDmg(p);
+        if(p.role==='scholar'&&!isSoloGame) _resolveScholarGuard(p,m,gs,now);
+        else _resolveMelee(p,m,effectiveAction,gs,now);
+      } else if(d<=1&&m.stance==='移'&&effectiveAction){
+        const vuln=(m.vulnerable||0)>0?1.5:1;
+        const dmg=Math.round(_playerDmg(p)*vuln);
         m.hp=Math.max(0,m.hp-dmg);
-        gs.combatResults.push({result:'win', mx:m.x, my:m.y, px:p.x, py:p.y});
+        gs.combatResults.push({result:'win',mx:m.x,my:m.y,px:p.x,py:p.y});
         _msg(gs,`✓ ${p.name} 自由攻擊 ${m.label}！-${dmg}HP`,now);
         if(m.hp===0) _msg(gs,`${m.label} 被 ${p.name} 擊倒！`,now);
       }
@@ -574,22 +593,80 @@ function resolveTurn(gs) {
 function _resolveMelee(player, monster, playerAction, gs, now) {
   const result=STANCE_RESULT[playerAction]?.[monster.stance]||'lose';
   const mDmg=Math.round(gs.monsterDmg*(MONSTER_DEFS[monster.monsterType]?.dmgMult||1));
+  const vuln=(monster.vulnerable||0)>0?1.5:1;
 
   gs.combatResults.push({result, mx:monster.x, my:monster.y, px:player.x, py:player.y});
 
   if(result==='win'){
-    const dmg=_playerDmg(player);
+    const dmg=Math.round(_playerDmg(player)*vuln);
     monster.hp=Math.max(0,monster.hp-dmg);
-    _msg(gs,`✓ ${player.name} 反制 ${monster.label}（${playerAction}→${monster.stance}）！`,now);
+    _msg(gs,`✓ ${player.name} 反制 ${monster.label}（${playerAction}→${monster.stance}）！-${dmg}HP`,now);
     if(monster.hp===0) _msg(gs,`${monster.label} 被擊倒！`,now);
   } else if(result==='clash'){
-    const pdmg=Math.round(_playerDmg(player)*0.5), mdmg=Math.round(mDmg*0.5);
+    const pdmg=Math.round(_playerDmg(player)*0.5*vuln), mdmg=Math.round(mDmg*0.5);
     monster.hp=Math.max(0,monster.hp-pdmg);
     player.hp =Math.max(0,player.hp-mdmg);
     _msg(gs,`⚡ ${player.name} 與 ${monster.label} 互相攻擊！`,now);
-  } else { // lose
+  } else {
     player.hp=Math.max(0,player.hp-mDmg);
     _msg(gs,`✗ ${player.name} 被 ${monster.label}（${monster.stance}）擊中！-${mDmg}HP`,now);
+  }
+}
+
+function _resolvePlayerRanged(player, targetId, combatAction, gs, now) {
+  const m=gs.monsters.find(mo=>mo.id===targetId&&mo.hp>0);
+  if(!m) return;
+  if(dist(player.x,player.y,m.x,m.y)>_playerRange(player)) return;
+
+  const mDmg=Math.round(gs.monsterDmg*(MONSTER_DEFS[m.monsterType]?.dmgMult||1));
+  const pDmg=_playerDmg(player);
+  const vuln=(m.vulnerable||0)>0?1.5:1;
+  const kind=player.role==='scout'?'arrow':'rock';
+  gs.projectiles.push({id:gs.projSeq++,kind,
+    fromX:player.x,fromY:player.y,toX:m.x,toY:m.y,createdAt:now,dur:400});
+
+  const result=STANCE_RESULT[combatAction]?.[m.stance]||'lose';
+  gs.combatResults.push({result,mx:m.x,my:m.y,px:player.x,py:player.y});
+
+  if(result==='win'){
+    const dmg=Math.round(pDmg*vuln);
+    m.hp=Math.max(0,m.hp-dmg);
+    _msg(gs,`✓ ${player.name} 遠程反制 ${m.label}！-${dmg}HP`,now);
+    if(m.hp===0) _msg(gs,`${m.label} 被擊倒！`,now);
+  } else if(result==='clash'){
+    const dmg=Math.round(pDmg*0.5*vuln);
+    m.hp=Math.max(0,m.hp-dmg);
+    _msg(gs,`⚡ ${player.name} 遠程互拍 ${m.label}！-${dmg}HP`,now);
+  } else if(result==='block'){
+    const dmg=Math.round(pDmg*0.3*vuln);
+    m.hp=Math.max(0,m.hp-dmg);
+    _msg(gs,`🛡 ${player.name} 格擋並反擊！-${dmg}HP`,now);
+  } else {
+    _msg(gs,`✗ ${player.name} 遠程攻擊失敗！`,now);
+  }
+}
+
+function _resolveScholarGuard(player, monster, gs, now) {
+  const mDmg=Math.round(gs.monsterDmg*(MONSTER_DEFS[monster.monsterType]?.dmgMult||1));
+  const vuln=(monster.vulnerable||0)>0?1.5:1;
+  const result=STANCE_RESULT['架']?.[monster.stance]||'lose';
+  gs.combatResults.push({result,mx:monster.x,my:monster.y,px:player.x,py:player.y});
+
+  if(result==='win'){
+    const dmg=Math.round(15*vuln);
+    monster.hp=Math.max(0,monster.hp-dmg);
+    monster.vulnerable=2;
+    _msg(gs,`🛡 ${player.name} 學者格擋成功！${monster.label} 易傷 2 拍！-${dmg}HP`,now);
+    if(monster.hp===0) _msg(gs,`${monster.label} 被擊倒！`,now);
+  } else if(result==='clash'){
+    const dmg=Math.round(8*vuln);
+    monster.hp=Math.max(0,monster.hp-dmg);
+    player.hp=Math.max(0,player.hp-Math.round(mDmg*0.5));
+    if(!monster.vulnerable) monster.vulnerable=1;
+    _msg(gs,`⚡ ${player.name} 學者互拍！${monster.label} 易傷 1 拍！`,now);
+  } else {
+    player.hp=Math.max(0,player.hp-mDmg);
+    _msg(gs,`✗ ${player.name} 學者格擋失敗！-${mDmg}HP`,now);
   }
 }
 
@@ -692,10 +769,10 @@ function _tickBossExit(gs){
 
 const CD = { SCOUT_PING:4000, SCHOLAR_MARK:8000, ARCH_WALL:8000 };
 
-function submitPlayerAction(gs, playerId, dx, dy, combatAction) {
+function submitPlayerAction(gs, playerId, dx, dy, combatAction, targetId) {
   const p=gs.players[playerId];
   if(!p||p.hp<=0) return;
-  gs.pendingActions[playerId]={dx:dx||0,dy:dy||0,combatAction:combatAction||null};
+  gs.pendingActions[playerId]={dx:dx||0,dy:dy||0,combatAction:combatAction||null,targetId:targetId||null};
 }
 
 function placeWall(gs, playerId, wx, wy) {
@@ -721,9 +798,10 @@ function markMonster(gs, playerId, monsterId) {
   if(now-p.lastSpecial<CD.SCHOLAR_MARK) return false;
   const m=gs.monsters.find(mo=>mo.id===monsterId&&mo.hp>0);
   if(!m) return false;
-  m.slowUntil=now+6000; p.lastSpecial=now;
-  // Broadcast stance info as a message so fighter can see
-  _msg(gs,`📢 學者：${m.label} 姿態=${m.stance||'未知'}，下回合減速`,now);
+  m.slowUntil=now+6000;
+  m.stanceRevealUntil=now+4000;
+  p.lastSpecial=now;
+  _msg(gs,`📢 學者標記 ${m.label}【${m.stance||'?'}】，全隊可見！`,now);
   return true;
 }
 
@@ -775,12 +853,16 @@ function checkEndConditions(gs){
 
 // ── Per-role state filtering ──────────────────────────────────────────────────
 
-function _monsterSnap(m, posOnly) {
-  const base={id:m.id,monsterType:m.monsterType,label:m.label,
-    x:m.x,y:m.y,hp:m.hp,maxHp:m.maxHp,stance:m.stance};
-  if(posOnly) return base;
-  return {...base, slowed:m.slowUntil>Date.now(),
-    shootTo:m.shootTo||null, nextTarget:m.nextTarget};
+function _monsterSnap(m, showStance) {
+  const revealed = m.stanceRevealUntil && m.stanceRevealUntil > Date.now();
+  return {
+    id:m.id, monsterType:m.monsterType, label:m.label,
+    x:m.x, y:m.y, hp:m.hp, maxHp:m.maxHp,
+    stance:(showStance||revealed) ? m.stance : null,
+    slowed:m.slowUntil>Date.now(),
+    shootTo:m.shootTo||null, nextTarget:m.nextTarget,
+    vulnerable:(m.vulnerable||0)>0,
+  };
 }
 
 function _fighterViewport(gs, myPlayer) {
@@ -800,7 +882,7 @@ function _fighterViewport(gs, myPlayer) {
   }
   const visMonsters=gs.monsters
     .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=VIEW&&Math.abs(m.y-vy)<=VIEW)
-    .map(m=>_monsterSnap(m,false));
+    .map(m=>_monsterSnap(m,true));
   return {localGrid, viewX:vx-VIEW, viewY:vy-VIEW, monsters:visMonsters};
 }
 
@@ -833,15 +915,14 @@ function filterStateForRole(gs, role, playerId) {
   if(role==='solo'||Object.keys(gs.players).length===1){
     const alerts=_buildAlerts(gs);
     return {...base, grid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
-      monsters:gs.monsters.map(m=>_monsterSnap(m,false)),
+      monsters:gs.monsters.map(m=>_monsterSnap(m,true)),
       traps:gs.traps, alerts, specialCd, isSolo:true};
   }
 
-  // Fighter: local viewport centered on self
+  // Fighter: 9×9 viewport, sees stances
   if(role==='fighter'){
     const me=myPlayer, VIEW=4;
     const vx=me?me.x:0, vy=me?me.y:0;
-    const span=VIEW*2+1;
     const localGrid=[];
     for(let dy=-VIEW;dy<=VIEW;dy++){
       const row=[];
@@ -853,35 +934,72 @@ function filterStateForRole(gs, role, playerId) {
     }
     const visMonsters=gs.monsters
       .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=VIEW&&Math.abs(m.y-vy)<=VIEW)
-      .map(m=>_monsterSnap(m,false));
+      .map(m=>_monsterSnap(m,true));
     return {...base, localGrid, viewX:vx-VIEW, viewY:vy-VIEW, monsters:visMonsters};
   }
 
-  // All other roles: share fighter's viewport for the canvas.
-  const sharedView=_fighterViewport(gs, myPlayer);
-
+  // Scout: 15×15 extended view (centred on fighter), stances only if revealed
   if(role==='scout'){
-    // Scout: fighter viewport + full map data for overlay
-    return {...base, ...sharedView,
+    const fighter=Object.values(gs.players).find(p=>p.role==='fighter'&&p.hp>0)
+               || Object.values(gs.players).find(p=>p.role==='fighter');
+    const SVIEW=7;
+    const vx=fighter?fighter.x:(myPlayer?myPlayer.x:0);
+    const vy=fighter?fighter.y:(myPlayer?myPlayer.y:0);
+    const localGrid=[];
+    for(let dy=-SVIEW;dy<=SVIEW;dy++){
+      const row=[];
+      for(let dx=-SVIEW;dx<=SVIEW;dx++){
+        const gx=vx+dx, gy=vy+dy;
+        row.push((gx<0||gy<0||gx>=gs.W||gy>=gs.H)?TILE.WALL:gs.grid[gy][gx]);
+      }
+      localGrid.push(row);
+    }
+    const visMonsters=gs.monsters
+      .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=SVIEW&&Math.abs(m.y-vy)<=SVIEW)
+      .map(m=>_monsterSnap(m,false));
+    return {...base, localGrid, viewX:vx-SVIEW, viewY:vy-SVIEW, monsters:visMonsters,
       fullGrid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
       traps:gs.traps.map(t=>({x:t.x,y:t.y,triggered:t.triggered})),
       specialCd};
   }
 
+  // Scholar: 7×7 own viewport, sees ALL stances
   if(role==='scholar'){
-    // Scholar: fighter viewport canvas + full monster list for info panel
-    return {...base, ...sharedView,
+    const me=myPlayer, SVIEW=3;
+    const vx=me?me.x:0, vy=me?me.y:0;
+    const localGrid=[];
+    for(let dy=-SVIEW;dy<=SVIEW;dy++){
+      const row=[];
+      for(let dx=-SVIEW;dx<=SVIEW;dx++){
+        const gx=vx+dx, gy=vy+dy;
+        row.push((gx<0||gy<0||gx>=gs.W||gy>=gs.H)?TILE.WALL:gs.grid[gy][gx]);
+      }
+      localGrid.push(row);
+    }
+    const visMonsters=gs.monsters
+      .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=SVIEW&&Math.abs(m.y-vy)<=SVIEW)
+      .map(m=>_monsterSnap(m,true));
+    return {...base, localGrid, viewX:vx-SVIEW, viewY:vy-SVIEW, monsters:visMonsters,
       alerts:_buildAlerts(gs),
-      allMonsters:gs.monsters.map(m=>_monsterSnap(m,false)),
+      allMonsters:gs.monsters.map(m=>_monsterSnap(m,true)),
       specialCd};
   }
 
+  // All other roles (architect): fighter's 9×9 viewport, stances only if revealed
+  const sharedView=_fighterViewport(gs, myPlayer);
+
   if(role==='architect'){
-    // Architect: fighter viewport + full map for wall placement
-    return {...base, ...sharedView,
+    const fighter=Object.values(gs.players).find(p=>p.role==='fighter'&&p.hp>0)
+               || Object.values(gs.players).find(p=>p.role==='fighter');
+    const VIEW=4;
+    const vx=fighter?fighter.x:(myPlayer?myPlayer.x:0);
+    const vy=fighter?fighter.y:(myPlayer?myPlayer.y:0);
+    const archMonsters=gs.monsters
+      .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=VIEW&&Math.abs(m.y-vy)<=VIEW)
+      .map(m=>_monsterSnap(m,false));
+    return {...base, ...sharedView, monsters:archMonsters,
       fullGrid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
-      traps:gs.traps,
-      myWalls:myPlayer?.walls||[], specialCd};
+      traps:gs.traps, myWalls:myPlayer?.walls||[], specialCd};
   }
 
   return base;

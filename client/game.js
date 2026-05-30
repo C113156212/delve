@@ -46,8 +46,9 @@ let isSolo           = false;
 let _devSocket       = null;
 let mapOverlayActive = false;
 
-let actionQueue = [];
-const QUEUE_MAX  = 5;
+let pendingDir      = {dx:0, dy:0};  // single-slot movement
+let pendingTargetId = null;
+let hoverMonsterId  = null;
 
 // Current pending action for this player (shown in UI)
 let pendingDx   = 0;
@@ -221,20 +222,14 @@ function initGame(socket, role, playerId, playerCount) {
   displayPos.clear();
   effects=[]; floatingNums=[]; projSeen.clear();
   pendingDx=0; pendingDy=0; pendingAct=null;
-  actionQueue=[]; mapOverlayActive=false;
+  pendingDir={dx:0,dy:0}; pendingTargetId=null; hoverMonsterId=null;
+  mapOverlayActive=false;
   lastCombatResultTs=0;
 
   buildGameScreen(role);
   buildActionPad(socket, role);
   setupInput(socket);
 
-  if (role==='architect'||isSolo) {
-    const canvas=document.getElementById('game-canvas');
-    canvas.addEventListener('click', (e)=>{
-      const {tx,ty}=canvasToTile(canvas,e,latestState);
-      if(tx!==null) socket.emit('place_wall',{x:tx,y:ty});
-    });
-  }
   if (role==='scout'||isSolo) {
     const canvas=document.getElementById('game-canvas');
     canvas.addEventListener('contextmenu',(e)=>{
@@ -272,7 +267,8 @@ function onBeat(socket) {
 
 function stopGame() {
   if (animId) cancelAnimationFrame(animId);
-  animId=null; latestState=null; actionQueue=[];
+  animId=null; latestState=null;
+  pendingDir={dx:0,dy:0}; pendingTargetId=null;
 }
 
 // ── Level banner ──────────────────────────────────────────────────────────────
@@ -346,8 +342,8 @@ function buildActionPad(socket, role) {
   el.innerHTML=`
     <div class="pad-section">
       <div class="pad-header">
-        <span class="pad-label">移動方向 (WASD)</span>
-        <button class="queue-clear-btn" onclick="window._clearQueue()" title="清除佇列 (Esc)">✕ 清除</button>
+        <span class="pad-label">移動 (WASD)</span>
+        <span id="pending-dir-badge" class="pad-label" style="color:#1D9E75">·</span>
       </div>
       <div class="dir-pad">
         <div></div>
@@ -360,10 +356,6 @@ function buildActionPad(socket, role) {
         <button class="dir-btn" onclick="window._setDir(0,1)">↓</button>
         <div></div>
       </div>
-      <div class="queue-row">
-        <span class="queue-label">佇列</span>
-        <div id="queue-display" class="queue-display empty">（空）</div>
-      </div>
       ${actionButtons}
       <div id="pad-preview" class="pad-preview">等待下一拍…</div>
     </div>
@@ -371,23 +363,50 @@ function buildActionPad(socket, role) {
 
   window._setDir = (dx, dy) => {
     if (dx===0&&dy===0) {
-      actionQueue=[]; pendingDx=0; pendingDy=0; pendingAct=null;
-      socket.emit('player_submit',{dx:0,dy:0,combatAction:null});
-      updatePadUI(); updateQueueUI(); return;
+      pendingDir={dx:0,dy:0}; pendingTargetId=null; pendingAct=null;
+      socket.emit('player_submit',{dx:0,dy:0,combatAction:null,targetId:null});
+      updatePadUI(); _updateDirBadge(); return;
     }
-    if (actionQueue.length < QUEUE_MAX) { actionQueue.push({dx,dy}); updateQueueUI(); }
+    pendingDir={dx,dy};
+    socket.emit('player_submit',{dx,dy,combatAction:pendingAct,targetId:pendingTargetId});
+    _updateDirBadge(); updatePadUI();
   };
   window._setAct = (act) => {
     pendingAct=act;
     _submitAndRefresh(socket);
   };
-  window._clearQueue = () => { actionQueue=[]; updateQueueUI(); };
-  window._removeQueueItem = (i) => { actionQueue.splice(i,1); updateQueueUI(); };
   window._markMonster = (id) => socket.emit('mark_monster', { monsterId:id });
+
+  // Canvas: click to attack, mousemove for hover
+  const canvas = document.getElementById('game-canvas');
+  if (canvas) {
+    canvas.addEventListener('mousemove', (e) => {
+      const {tx,ty}=canvasToTile(canvas,e,latestState);
+      if(tx===null){hoverMonsterId=null;return;}
+      const m=latestState?.monsters?.find(mo=>mo.hp>0&&mo.x===tx&&mo.y===ty);
+      hoverMonsterId=m?m.id:null;
+      canvas.style.cursor=hoverMonsterId?'crosshair':'default';
+    });
+    canvas.addEventListener('mouseleave',()=>{hoverMonsterId=null;canvas.style.cursor='default';});
+    canvas.addEventListener('click',(e)=>{
+      if(!latestState) return;
+      const {tx,ty}=canvasToTile(canvas,e,latestState);
+      if(tx===null) return;
+      // Architect: wall placement on empty floor
+      if((gameRole==='architect'||isSolo)&&!latestState?.monsters?.find(mo=>mo.hp>0&&mo.x===tx&&mo.y===ty)){
+        socket.emit('place_wall',{x:tx,y:ty}); return;
+      }
+      // Attack: click on monster
+      const m=latestState?.monsters?.find(mo=>mo.hp>0&&mo.x===tx&&mo.y===ty);
+      if(!m) return;
+      pendingTargetId=m.id;
+      _submitAndRefresh(socket);
+    });
+  }
 }
 
 function _submitAndRefresh(socket) {
-  socket.emit('player_submit', { dx:pendingDx, dy:pendingDy, combatAction:pendingAct });
+  socket.emit('player_submit', { dx:pendingDir.dx, dy:pendingDir.dy, combatAction:pendingAct, targetId:pendingTargetId });
   updatePadUI();
 }
 
@@ -417,18 +436,12 @@ function updatePadUI() {
   }
 }
 
-function updateQueueUI() {
-  const el=document.getElementById('queue-display');
+function _updateDirBadge() {
+  const el=document.getElementById('pending-dir-badge');
   if(!el) return;
-  if(actionQueue.length===0){
-    el.innerHTML='（空）'; el.className='queue-display empty';
-  } else {
-    const arrow = a => a.dx>0?'→':a.dx<0?'←':a.dy>0?'↓':a.dy<0?'↑':'·';
-    el.innerHTML=actionQueue.map((a,i)=>
-      `<span class="queue-item" onclick="window._removeQueueItem(${i})" title="點擊移除">${arrow(a)}</span>`
-    ).join('');
-    el.className='queue-display';
-  }
+  const {dx,dy}=pendingDir;
+  el.textContent=dx>0?'→':dx<0?'←':dy>0?'↓':dy<0?'↑':'·';
+  el.style.color=(dx||dy)?'#1D9E75':'#333';
 }
 
 function updateBeatUI(beat, socket) {
@@ -441,15 +454,10 @@ function updateBeatUI(beat, socket) {
   }
   if (beat===1) {
     pendingAct=null;
-    if (actionQueue.length>0) {
-      const next=actionQueue.shift();
-      pendingDx=next.dx; pendingDy=next.dy;
-    } else {
-      pendingDx=0; pendingDy=0;
-    }
-    updatePadUI();
-    updateQueueUI();
-    if (socket) socket.emit('player_submit', { dx:pendingDx, dy:pendingDy, combatAction:null });
+    // Auto-submit single-slot direction, then clear for next turn
+    if (socket) socket.emit('player_submit', {dx:pendingDir.dx, dy:pendingDir.dy, combatAction:null, targetId:pendingTargetId});
+    pendingDir={dx:0,dy:0}; pendingTargetId=null;
+    updatePadUI(); _updateDirBadge();
   }
 }
 
@@ -523,7 +531,7 @@ function canvasToTile(canvas, e, state) {
   if(!state) return {tx:null,ty:null};
   const rect=canvas.getBoundingClientRect();
   if(state.localGrid){
-    const VIEW=4, span=VIEW*2+1;
+    const span=state.localGrid.length;
     const ts=getTileSize(canvas,span,span);
     const lx=Math.floor((e.clientX-rect.left)/ts);
     const ly=Math.floor((e.clientY-rect.top)/ts);
@@ -749,6 +757,15 @@ function renderFighter(canvas, state, now) {
   drawWindmillArms(ctx,state.windmillArms,ts,smoothOx,smoothOy,now);
   if(state.monsters) for(const m of state.monsters){
     if(m.hp<=0) continue; drawMonster(ctx,m,ts,smoothOx,smoothOy,now);
+    if(m.vulnerable){
+      const dp2=getDisplayPos('m_'+m.id,m.x,m.y,now,MONSTER_ANIM_MS);
+      const vcx=(dp2.x-smoothOx)*ts+ts/2, vcy=(dp2.y-smoothOy)*ts+ts/2;
+      const pulse=0.5+0.5*Math.sin(now/150);
+      ctx.save(); ctx.globalAlpha=0.35+pulse*0.2;
+      ctx.beginPath(); ctx.arc(vcx,vcy,ts*0.55,0,Math.PI*2);
+      ctx.strokeStyle='#aa44ff'; ctx.lineWidth=2.5; ctx.setLineDash([4,3]); ctx.stroke();
+      ctx.restore();
+    }
   }
   if(state.players) for(const p of Object.values(state.players)){
     const lx=p.x-iox, ly=p.y-ioy;
@@ -783,16 +800,23 @@ function renderArchitect(canvas, state, now) {
   drawEffects(ctx,ts,now,0,0); drawFloatingNums(ctx,ts,now,0,0);
 }
 
+function _rangeForRole(role) {
+  return {fighter:1,scout:5,scholar:1,architect:3}[role]||1;
+}
+
 function renderSharedView(canvas, state, now) {
-  const VIEW=4, span=VIEW*2+1;
+  const span=state.localGrid?.length||9;
+  const VIEW=Math.floor(span/2);
   const ts=fitCanvas(canvas,span,span);
   const ctx=canvas.getContext('2d');
   ctx.clearRect(0,0,canvas.width,canvas.height);
   if(!state.localGrid) return;
 
-  // Camera follows fighter smoothly
+  // Camera: for scout/architect follow fighter; for scholar follow self
   const fighter=Object.values(state.players||{}).find(p=>p.role==='fighter');
-  const camP=fighter||Object.values(state.players||{})[0];
+  const camP = gameRole==='scholar'
+    ? state.players?.[gameId]
+    : (fighter||Object.values(state.players||{})[0]);
   let smoothOx, smoothOy;
   if(camP){
     const dp=getDisplayPos('p_'+camP.id,camP.x,camP.y,now,PLAYER_ANIM_MS);
@@ -803,8 +827,46 @@ function renderSharedView(canvas, state, now) {
   drawWindmillArms(ctx,state.windmillArms,ts,smoothOx,smoothOy,now);
   if(state.pressurePlates) drawPressurePlates(ctx,state.pressurePlates,ts,smoothOx,smoothOy);
 
+  // Attack range overlay
+  const me=state.players?.[gameId];
+  if(me){
+    const range=_rangeForRole(gameRole);
+    ctx.save(); ctx.globalAlpha=0.07;
+    ctx.fillStyle=ROLE_COLOR[gameRole]||'#fff';
+    for(let dy=-range;dy<=range;dy++) for(let dx=-range;dx<=range;dx++){
+      if(Math.abs(dx)+Math.abs(dy)>range) continue;
+      const lx=me.x+dx-smoothOx, ly=me.y+dy-smoothOy;
+      if(lx<0||ly<0||lx>=span||ly>=span) continue;
+      ctx.fillRect(lx*ts,ly*ts,ts,ts);
+    }
+    ctx.restore();
+  }
+
   if(state.monsters) for(const m of state.monsters){
     if(m.hp<=0) continue; drawMonster(ctx,m,ts,smoothOx,smoothOy,now);
+    // Vulnerable glow
+    if(m.vulnerable){
+      const dp2=getDisplayPos('m_'+m.id,m.x,m.y,now,MONSTER_ANIM_MS);
+      const vcx=(dp2.x-smoothOx)*ts+ts/2, vcy=(dp2.y-smoothOy)*ts+ts/2;
+      const pulse=0.5+0.5*Math.sin(now/150);
+      ctx.save(); ctx.globalAlpha=0.35+pulse*0.2;
+      ctx.beginPath(); ctx.arc(vcx,vcy,ts*0.55,0,Math.PI*2);
+      ctx.strokeStyle='#aa44ff'; ctx.lineWidth=2.5; ctx.setLineDash([4,3]); ctx.stroke();
+      ctx.restore();
+    }
+    // Hover / selected target highlight
+    const isHover=m.id===hoverMonsterId, isTarget=m.id===pendingTargetId;
+    if(isHover||isTarget){
+      const dp2=getDisplayPos('m_'+m.id,m.x,m.y,now,MONSTER_ANIM_MS);
+      const lx=(dp2.x-smoothOx)*ts, ly=(dp2.y-smoothOy)*ts;
+      ctx.save();
+      ctx.strokeStyle=isTarget?'#ffee44':'rgba(255,255,255,0.5)';
+      ctx.lineWidth=isTarget?2:1.5;
+      if(isTarget) ctx.setLineDash([]);
+      else ctx.setLineDash([3,3]);
+      ctx.strokeRect(lx+1,ly+1,ts-2,ts-2);
+      ctx.restore();
+    }
   }
 
   // Architect: highlight own walls within viewport
@@ -1009,19 +1071,30 @@ function setupInput(socket) {
   };
   const actMap = { '1':'刺','2':'斬','3':'架','0':null,'j':'刺','k':'斬','l':'架','J':'刺','K':'斬','L':'架' };
 
+  const STANCES=[null,'刺','斬','架'];
+  const dirMap2={w:[0,-1],s:[0,1],a:[-1,0],d:[1,0],W:[0,-1],S:[0,1],A:[-1,0],D:[1,0],
+    ArrowUp:[0,-1],ArrowDown:[0,1]};
+
   document.addEventListener('keydown',(e)=>{
     if(e.key==='m'||e.key==='M'){ mapOverlayActive=true; return; }
     if(e.key==='Escape'){
-      actionQueue=[]; pendingDx=0; pendingDy=0; pendingAct=null;
-      socket.emit('player_submit',{dx:0,dy:0,combatAction:null});
-      updatePadUI(); updateQueueUI(); return;
+      pendingDir={dx:0,dy:0}; pendingTargetId=null; pendingAct=null;
+      socket.emit('player_submit',{dx:0,dy:0,combatAction:null,targetId:null});
+      updatePadUI(); _updateDirBadge(); return;
     }
     if(!latestState||latestState.phase!=='playing') return;
-    const dir=dirMap[e.key];
+    const dir=dirMap2[e.key];
     if(dir){
       e.preventDefault();
-      if(actionQueue.length<QUEUE_MAX){ actionQueue.push({dx:dir[0],dy:dir[1]}); updateQueueUI(); }
-      return;
+      pendingDir={dx:dir[0],dy:dir[1]};
+      socket.emit('player_submit',{dx:dir[0],dy:dir[1],combatAction:pendingAct,targetId:pendingTargetId});
+      _updateDirBadge(); updatePadUI(); return;
+    }
+    if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+      e.preventDefault();
+      const idx=STANCES.indexOf(pendingAct);
+      pendingAct=e.key==='ArrowRight'?STANCES[(idx+1)%STANCES.length]:STANCES[(idx-1+STANCES.length)%STANCES.length];
+      _submitAndRefresh(socket); return;
     }
     if(e.key in actMap){ e.preventDefault(); pendingAct=actMap[e.key]; _submitAndRefresh(socket); return; }
     if(e.key===' '||e.code==='Space'){ e.preventDefault(); _submitAndRefresh(socket); }
@@ -1046,10 +1119,10 @@ function buildQuickMessages(socket, role) {
 // ── Role help ─────────────────────────────────────────────────────────────────
 
 const ROLE_HELP = {
-  scout:     'WASD 移動 · M 按住看全圖\nJ/K/L 攻擊(20傷) · Esc 停下\n右鍵標記位置',
-  fighter:   'WASD 移動 · J/K/L 選擇動作\nJ=刺(克黃) K=斬(克蒼) L=架(克赤)\n0=純移動 · Esc=立即停下',
-  scholar:   'WASD 移動 · J/K/L 攻擊(20傷)\n點「標記」減速怪物 · Esc 停下',
-  architect: 'WASD 移動 · J/K/L 攻擊(20傷)\n點地圖放牆 · Esc 停下',
+  scout:     'WASD/↑↓移動 · ←→切換招式(35傷)\n點怪物射擊(d≤5) · M看全圖\n右鍵標記位置',
+  fighter:   'WASD/↑↓移動 · ←→切換招式(35傷)\nJ/K/L 快捷 · Esc停下',
+  scholar:   'WASD/↑↓移動 · 只能用架(15傷)\n架成功→易傷2拍 · 點標記廣播招式',
+  architect: 'WASD/↑↓移動 · ←→切換招式(20傷)\n點怪物投擲(d≤3) · 點地圖放牆',
 };
 
 function buildRoleHelp(role) {
