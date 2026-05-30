@@ -57,7 +57,11 @@ function removePlayer(code, pid)    {
   const room = rooms.get(code);
   if (!room) return;
   room.players = room.players.filter(p => p.id !== pid);
-  if (room.players.length === 0) rooms.delete(code);
+  if (room.players.length === 0) {
+    rooms.delete(code);
+  } else if (room.hostId === pid) {
+    room.hostId = room.players[0].id;
+  }
 }
 
 module.exports = { createRoom, joinRoom, pickRole, canStart, getRoom, setPhase, removePlayer };

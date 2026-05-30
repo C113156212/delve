@@ -16,123 +16,56 @@
       align-items: center;
       justify-content: center;
     }
-
-    /* ── 畫面容器 ── */
-    .screen {
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      width: 360px;
-      padding: 0 16px;
+    body.in-game {
+      align-items: stretch;
+      justify-content: flex-start;
+      overflow: hidden;
     }
+
+    /* ── screens ── */
+    .screen { display: none; flex-direction: column; align-items: center; gap: 12px; width: 360px; padding: 0 16px; }
     .screen.active { display: flex; }
+    #screen-game { width: 100%; height: 100vh; padding: 0; }
+    #screen-game.active { display: block; }
 
-    /* ── 標題 ── */
-    .game-title {
-      font-size: 52px;
-      letter-spacing: 0.25em;
-      color: #1D9E75;
-      margin-bottom: 4px;
-    }
-    .game-sub {
-      font-size: 11px;
-      color: #333;
-      letter-spacing: 0.12em;
-      margin-bottom: 20px;
-    }
-
-    /* ── 輸入框 ── */
+    /* ── lobby styles ── */
+    .game-title  { font-size: 52px; letter-spacing: 0.25em; color: #1D9E75; margin-bottom: 4px; }
+    .game-sub    { font-size: 11px; color: #333; letter-spacing: 0.12em; margin-bottom: 20px; }
     input {
-      width: 100%;
-      padding: 11px 14px;
-      background: #0f0f14;
-      border: 1px solid #222;
-      color: #e0ddd5;
-      font-family: inherit;
-      font-size: 14px;
-      outline: none;
-      transition: border-color 0.15s;
+      width: 100%; padding: 11px 14px;
+      background: #0f0f14; border: 1px solid #222; color: #e0ddd5;
+      font-family: inherit; font-size: 14px; outline: none; transition: border-color 0.15s;
     }
     input:focus { border-color: #1D9E75; }
     input::placeholder { color: #2a2a2a; }
-
-    /* ── 按鈕 ── */
     button {
-      width: 100%;
-      padding: 11px 14px;
-      background: transparent;
-      border: 1px solid #2a2a2a;
-      color: #888;
-      font-family: inherit;
-      font-size: 13px;
-      cursor: pointer;
+      width: 100%; padding: 11px 14px;
+      background: transparent; border: 1px solid #2a2a2a; color: #888;
+      font-family: inherit; font-size: 13px; cursor: pointer;
       letter-spacing: 0.06em;
       transition: border-color 0.15s, color 0.15s, background 0.15s;
     }
     button:hover:not(:disabled) { border-color: #555; color: #e0ddd5; }
     button:disabled { opacity: 0.25; cursor: default; }
-    button.primary {
-      border-color: #1D9E75;
-      color: #1D9E75;
-    }
-    button.primary:hover:not(:disabled) {
-      background: #1D9E75;
-      color: #04342C;
-    }
-
-    /* ── 分隔線 ── */
+    button.primary { border-color: #1D9E75; color: #1D9E75; }
+    button.primary:hover:not(:disabled) { background: #1D9E75; color: #04342C; }
     .sep {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      color: #222;
-      font-size: 11px;
+      width: 100%; display: flex; align-items: center; gap: 12px;
+      color: #222; font-size: 11px;
     }
-    .sep::before, .sep::after {
-      content: '';
-      flex: 1;
-      border-top: 1px solid #1a1a1a;
-    }
-
-    /* ── 錯誤 / 提示 ── */
+    .sep::before, .sep::after { content: ''; flex: 1; border-top: 1px solid #1a1a1a; }
     .error { font-size: 12px; color: #D85A30; min-height: 18px; text-align: center; }
     .hint  { font-size: 11px; color: #333; text-align: center; line-height: 1.7; }
-
-    /* ── 房間代碼大字 ── */
     .room-code-display {
-      width: 100%;
-      text-align: center;
-      font-size: 40px;
-      letter-spacing: 0.35em;
-      color: #1D9E75;
-      border: 1px solid #1a3d2e;
-      padding: 14px 0;
-      background: #060e0a;
+      width: 100%; text-align: center; font-size: 40px; letter-spacing: 0.35em;
+      color: #1D9E75; border: 1px solid #1a3d2e; padding: 14px 0; background: #060e0a;
     }
-    .room-code-label {
-      font-size: 10px;
-      color: #2a4a3a;
-      letter-spacing: 0.15em;
-      margin-bottom: 4px;
-    }
-
-    /* ── 職業選擇格 ── */
-    .role-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      width: 100%;
-    }
+    .room-code-label { font-size: 10px; color: #2a4a3a; letter-spacing: 0.15em; margin-bottom: 4px; }
+    .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
     .role-btn {
-      padding: 16px 10px 12px;
-      border: 1px solid #1a1a1a;
-      background: #0d0d12;
-      cursor: pointer;
-      text-align: center;
-      transition: border-color 0.15s, background 0.15s;
-      user-select: none;
+      padding: 16px 10px 12px; border: 1px solid #1a1a1a; background: #0d0d12;
+      cursor: pointer; text-align: center;
+      transition: border-color 0.15s, background 0.15s; user-select: none;
     }
     .role-btn:hover:not(.taken) { border-color: #333; background: #111118; }
     .role-btn.selected  { border-color: #1D9E75; background: #060e0a; }
@@ -140,41 +73,307 @@
     .role-icon { font-size: 22px; margin-bottom: 6px; display: block; color: #e0ddd5; }
     .role-name { font-size: 13px; color: #ccc; display: block; margin-bottom: 3px; }
     .role-desc { font-size: 10px; color: #444; display: block; line-height: 1.5; }
-
-    /* ── 玩家列表 ── */
     .player-list { width: 100%; display: flex; flex-direction: column; gap: 5px; }
     .player-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 12px;
-      background: #0d0d12;
-      border: 1px solid #161616;
-      font-size: 12px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px; background: #0d0d12; border: 1px solid #161616; font-size: 12px;
     }
     .p-name { color: #aaa; }
     .p-host { color: #BA7517; font-size: 10px; margin-left: 4px; }
-    .p-role {
-      font-size: 10px;
-      padding: 2px 8px;
-      border-radius: 2px;
-      letter-spacing: 0.05em;
-    }
+    .p-role { font-size: 10px; padding: 2px 8px; border-radius: 2px; letter-spacing: 0.05em; }
     .p-role.scout     { background: #0a2018; color: #1D9E75; }
     .p-role.fighter   { background: #1a0a06; color: #D85A30; }
     .p-role.scholar   { background: #1a1206; color: #BA7517; }
     .p-role.architect { background: #0e0c1a; color: #7F77DD; }
     .p-role.none      { color: #333; }
+
+    /* ── tutorial modal ── */
+    #tutorial-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.85); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    #tutorial-overlay.open { display: flex; }
+    #tutorial-box {
+      background: #111118; border: 1px solid #222; max-width: 480px; width: 90%;
+      padding: 28px; display: flex; flex-direction: column; gap: 14px;
+    }
+    .tut-title { font-size: 18px; color: #1D9E75; letter-spacing: 0.15em; }
+    .tut-role  { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; font-size: 12px; line-height: 1.7; }
+    .tut-role-name { color: #ccc; font-weight: bold; white-space: nowrap; }
+    .tut-role-desc { color: #555; }
+    .tut-close { align-self: flex-end; width: auto; padding: 8px 20px; font-size: 12px; }
+
+    /* ── in-game layout ── */
+    #g-hud {
+      height: 46px; display: flex; align-items: center; gap: 12px;
+      padding: 0 14px; background: #0e0e1a;
+      border-bottom: 1px solid #1a1a2e; flex-shrink: 0;
+    }
+    #g-role-badge {
+      font-size: 11px; letter-spacing: 0.1em; padding: 3px 10px;
+      border-radius: 2px; white-space: nowrap; flex-shrink: 0;
+    }
+    .role-scout     { background: rgba(29,158,117,0.15); color: #1D9E75; }
+    .role-fighter   { background: rgba(216,90,48,0.15);  color: #D85A30; }
+    .role-scholar   { background: rgba(186,117,23,0.15); color: #BA7517; }
+    .role-architect { background: rgba(127,119,221,0.15);color: #7F77DD; }
+
+    #g-players { display: flex; gap: 10px; flex: 1; overflow: hidden; }
+    .hud-player {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; min-width: 90px;
+    }
+    .hud-player.dead { opacity: 0.3; }
+    .hud-pname { white-space: nowrap; font-size: 10px; }
+    .hud-hp-bar {
+      flex: 1; height: 5px; background: #1a1a2e;
+      border-radius: 2px; overflow: hidden; min-width: 30px;
+    }
+    .hud-hp-bar div { height: 100%; border-radius: 2px; transition: width 0.3s; }
+    .hud-hp-num { font-size: 10px; color: #555; white-space: nowrap; }
+    .exit-badge { font-size: 9px; color: #1D9E75; padding: 1px 4px; border: 1px solid #1D9E75; }
+    #g-timer { font-size: 18px; letter-spacing: 0.1em; color: #555; flex-shrink: 0; }
+
+    #g-body {
+      flex: 1; display: flex; overflow: hidden;
+      height: calc(100vh - 46px);
+    }
+    #g-main {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      background: #080810; overflow: hidden; position: relative;
+    }
+    #game-canvas { display: block; image-rendering: pixelated; }
+
+    /* Scholar panel */
+    #scholar-panel {
+      width: 100%; flex-direction: row; gap: 12px; padding: 12px;
+      align-items: flex-start; overflow: auto;
+    }
+    #scholar-radar-wrap { flex-shrink: 0; }
+    #scholar-radar { border: 1px solid #1a1a2e; display: block; }
+    #scholar-codex { flex: 1; }
+    #scholar-monster-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+    .mon-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 8px; background: #0d0d12; border: 1px solid #161616;
+    }
+    .mon-row.mon-dead { opacity: 0.3; }
+    .mon-label { font-size: 11px; color: #aaa; min-width: 60px; }
+    .mon-hp-bar { flex: 1; height: 4px; background: #1a1a2e; border-radius: 2px; overflow: hidden; }
+    .mon-hp-bar div { height: 100%; background: #cc4444; border-radius: 2px; transition: width 0.3s; }
+    .mark-btn {
+      width: auto; padding: 2px 8px; font-size: 10px;
+      border-color: #BA7517; color: #BA7517; flex-shrink: 0;
+    }
+    .mark-btn:hover { background: #BA7517; color: #000; }
+    .mon-dead-txt { font-size: 10px; color: #333; }
+    .tag-slow { font-size: 9px; color: #4488cc; }
+    .tag-tel  { font-size: 9px; color: #ff8800; }
+
+    /* Sidebar */
+    #g-sidebar {
+      width: 220px; flex-shrink: 0; display: flex; flex-direction: column;
+      gap: 8px; padding: 10px 10px; overflow-y: auto;
+      background: #0c0c16; border-left: 1px solid #1a1a2e;
+    }
+    .panel-label {
+      font-size: 9px; letter-spacing: 0.15em; color: #333;
+      text-transform: uppercase; padding-bottom: 4px;
+      border-bottom: 1px solid #161616; margin-bottom: 4px;
+    }
+    #g-messages { display: flex; flex-direction: column; gap: 3px; }
+    .game-msg { font-size: 11px; color: #666; line-height: 1.5; }
+    .scholar-alert { font-size: 11px; color: #D85A30; padding: 3px 0; border-bottom: 1px solid #1a1a1a; }
+    .scholar-quiet { font-size: 11px; color: #333; }
+    .cd-bar { display: flex; justify-content: space-between; font-size: 11px; color: #555; padding: 3px 0; }
+    .cd-bar.ready { color: #1D9E75; }
+    .help-text { font-size: 10px; color: #333; line-height: 1.8; white-space: pre; font-family: inherit; }
+    #g-quick { display: flex; flex-direction: column; gap: 4px; }
+    .quick-btn {
+      width: 100%; padding: 6px 10px; font-size: 11px;
+      border-color: #1a1a2e; color: #555; text-align: left;
+    }
+    .quick-btn:hover { border-color: #333; color: #aaa; }
+
+    /* Scholar panel in sidebar */
+    #g-alerts { font-size: 11px; }
+    #g-monsters { font-size: 11px; }
+
+    /* End overlay */
+    #end-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88); z-index: 50;
+      align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+    }
+    #end-overlay.open { display: flex; }
+    .end-title { font-size: 42px; letter-spacing: 0.2em; }
+    .end-win  { color: #1D9E75; }
+    .end-lose { color: #D85A30; }
+    .end-sub  { font-size: 13px; color: #555; }
+    #end-player-list { display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
+    .end-player-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 14px; border: 1px solid #1a1a1a; font-size: 12px;
+    }
+
+    /* Level-up banner */
+    #level-banner {
+      display: none; position: fixed; inset: 0; z-index: 80;
+      align-items: center; justify-content: center; flex-direction: column; gap: 12px;
+      background: rgba(0,0,0,0.72); pointer-events: none;
+    }
+    #level-banner.show { display: flex; }
+    .lv-title {
+      font-size: 52px; letter-spacing: 0.2em; color: #1D9E75;
+      text-shadow: 0 0 40px rgba(29,158,117,0.8);
+      animation: lv-pop 0.35s cubic-bezier(0.175,0.885,0.32,1.275) both;
+    }
+    .lv-sub { font-size: 15px; color: #555; letter-spacing: 0.15em; }
+    @keyframes lv-pop { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    /* Level badge in HUD */
+    #g-level-badge {
+      font-size: 11px; padding: 2px 8px; border: 1px solid #1a3d2e;
+      color: #1D9E75; letter-spacing: 0.12em; flex-shrink: 0;
+    }
+
+    /* ── Beat indicator ── */
+    #g-beat-row { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+    .beat-label { font-size: 9px; color: #444; letter-spacing: 0.1em; }
+    .beat-dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: #1a1a2e; border: 1px solid #2a2a4e;
+      transition: background 0.08s, box-shadow 0.08s;
+      display: inline-block;
+    }
+    .beat-dot.beat-done    { background: #1D4030; border-color: #1D9E75; }
+    .beat-dot.beat-current {
+      background: #1D9E75;
+      box-shadow: 0 0 12px rgba(29,158,117,0.9), 0 0 4px #fff;
+      animation: beat-pulse 0.3s ease-out;
+    }
+    .beat-dot.beat-resolve {
+      background: #D85A30;
+      box-shadow: 0 0 16px rgba(216,90,48,1), 0 0 5px #fff;
+      animation: beat-pulse 0.2s ease-out;
+    }
+    @keyframes beat-pulse {
+      from { transform: scale(1.9); }
+      to   { transform: scale(1); }
+    }
+
+    /* ── Action pad ── */
+    #g-action-pad { flex-shrink: 0; }
+    .pad-section { display: flex; flex-direction: column; gap: 6px; }
+    .pad-label { font-size: 9px; letter-spacing: 0.12em; color: #333; text-transform: uppercase; }
+    .dir-pad {
+      display: grid; grid-template-columns: repeat(3, 36px);
+      grid-template-rows: repeat(3, 36px); gap: 3px;
+    }
+    .dir-btn {
+      width: 36px; height: 36px; padding: 0; font-size: 16px;
+      border: 1px solid #222; color: #555; cursor: pointer;
+      background: #0d0d14; display: flex; align-items: center; justify-content: center;
+      transition: all 0.1s;
+    }
+    .dir-btn:hover:not(:disabled) { border-color: #444; color: #aaa; background: #12121a; }
+    .dir-btn.selected, .dir-btn:active { background: #1a2a22; border-color: #1D9E75; color: #1D9E75; }
+    .dir-stay { font-size: 20px; }
+    .action-row { display: flex; gap: 4px; }
+    .act-btn {
+      flex: 1; padding: 7px 4px; font-size: 13px; font-weight: bold;
+      border: 1px solid #222; color: #666; background: #0d0d14;
+      cursor: pointer; text-align: center; line-height: 1.3;
+      transition: all 0.1s;
+    }
+    .act-btn:hover:not(:disabled) { border-color: #444; color: #aaa; }
+    .act-btn.selected { background: #1a1a2a; border-color: #888; color: #fff; }
+    .act-btn#act-刺.selected { border-color: #ffcc22; color: #ffcc22; background: #1a1800; }
+    .act-btn#act-斬.selected { border-color: #ff7755; color: #ff7755; background: #1a0c08; }
+    .act-btn#act-架.selected { border-color: #44aaff; color: #44aaff; background: #081018; }
+    .act-none.selected       { border-color: #444;    color: #888;    background: #111; }
+    .pad-preview {
+      font-size: 10px; color: #444; padding: 4px 0;
+      border-top: 1px solid #161616; margin-top: 2px;
+    }
+    /* Stance tag in scholar */
+    .stance-tag {
+      font-size: 9px; padding: 1px 5px; border-radius: 2px; border: 1px solid; flex-shrink: 0;
+    }
+
+    /* ── Version badge ── */
+    #ver-badge {
+      position: fixed; bottom: 10px; right: 12px;
+      font-size: 10px; color: #222; letter-spacing: 0.08em;
+      pointer-events: none; z-index: 1;
+    }
+
+    /* ── Command queue ── */
+    .pad-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;
+    }
+    .queue-clear-btn {
+      width: auto; padding: 2px 8px; font-size: 10px;
+      border-color: #2a2a2a; color: #555;
+    }
+    .queue-clear-btn:hover { border-color: #555; color: #D85A30; }
+    .queue-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 2px; border-top: 1px solid #161616;
+    }
+    .queue-label { font-size: 9px; color: #333; letter-spacing: 0.1em; flex-shrink: 0; }
+    .queue-display {
+      flex: 1; font-size: 15px; letter-spacing: 3px; color: #1D9E75; min-height: 18px;
+    }
+    .queue-display.empty { color: #2a2a2a; font-size: 10px; letter-spacing: 0; }
+    .queue-item { cursor: pointer; display: inline-block; transition: color 0.1s; }
+    .queue-item:hover { color: #D85A30; }
   </style>
 </head>
 <body>
 
+<!-- ══ 教學覆蓋層 ══ -->
+<div id="tutorial-overlay">
+  <div id="tutorial-box">
+    <div class="tut-title">DELVE — 操作說明</div>
+    <div class="tut-role">
+      <span class="tut-role-name" style="color:#1D9E75">▲ 斥候</span>
+      <span class="tut-role-desc">看到完整地圖、怪物位置。右鍵標記位置讓隊友知道方向。移動引路。</span>
+      <span class="tut-role-name" style="color:#D85A30">■ 戰士</span>
+      <span class="tut-role-desc">唯一能攻擊的角色（空白鍵）。視野有限，需要斥候或學者告知怪物位置。</span>
+      <span class="tut-role-name" style="color:#BA7517">● 學者</span>
+      <span class="tut-role-desc">看到怪物的下一步行動（預告），點「標記」按鈕可讓怪物減速 5 秒。</span>
+      <span class="tut-role-name" style="color:#7F77DD">◆ 建築師</span>
+      <span class="tut-role-desc">看到完整地圖與陷阱類型。點地圖放置牆壁（最多 4 面，8 秒冷卻）。</span>
+    </div>
+    <div style="font-size:11px;color:#444;line-height:1.8">
+      目標：所有存活玩家同時走到出口（右下角）。<br>
+      怪物每 2 秒行動一次，會先預告 0.8 秒。<br>
+      一人模式擁有所有情報。快速訊息按鈕用於溝通。
+    </div>
+    <button class="tut-close primary" onclick="closeTutorial()">了解了，開始遊戲</button>
+  </div>
+</div>
+
+<!-- ══ 版本號 ══ -->
+<div id="ver-badge">v0.3.0</div>
+
+<!-- ══ 遊戲結束覆蓋層 ══ -->
+<div id="end-overlay">
+  <div class="end-title" id="end-title"></div>
+  <div class="end-sub"  id="end-sub"></div>
+  <div id="end-player-list"></div>
+  <button class="primary" style="width:200px;margin-top:8px" onclick="returnToLobby()">回到大廳</button>
+</div>
+
 <!-- ══ 畫面 1：輸入名字 ══ -->
 <div class="screen active" id="screen-name">
   <div class="game-title">DELVE</div>
-  <div class="game-sub">四人合作 · 資訊差 · 即時溝通</div>
+  <div class="game-sub">合作 · 資訊差 · 即時溝通</div>
   <input id="inp-name" placeholder="輸入你的名字" maxlength="12" autocomplete="off">
-  <button class="primary" onclick="submitName()">進入遊戲</button>
+  <button class="primary" id="btn-enter">進入遊戲</button>
+  <button id="btn-tutorial" style="margin-top:4px;font-size:11px">? 新手說明</button>
   <div class="error" id="err-name"></div>
 </div>
 
@@ -196,24 +395,24 @@
 
   <div class="role-grid">
     <div class="role-btn" id="rbtn-scout" onclick="doPickRole('scout')">
-      <span class="role-icon">▲</span>
+      <span class="role-icon" style="color:#1D9E75">▲</span>
       <span class="role-name">斥候</span>
-      <span class="role-desc">地圖・出口・預警</span>
+      <span class="role-desc">全地圖視野・標記位置</span>
     </div>
     <div class="role-btn" id="rbtn-fighter" onclick="doPickRole('fighter')">
-      <span class="role-icon">■</span>
+      <span class="role-icon" style="color:#D85A30">■</span>
       <span class="role-name">戰士</span>
-      <span class="role-desc">攻擊・視野・站位</span>
+      <span class="role-desc">唯一攻擊者・局部視野</span>
     </div>
     <div class="role-btn" id="rbtn-scholar" onclick="doPickRole('scholar')">
-      <span class="role-icon">●</span>
+      <span class="role-icon" style="color:#BA7517">●</span>
       <span class="role-name">學者</span>
-      <span class="role-desc">詞條・謎題・播報</span>
+      <span class="role-desc">怪物預告・減速標記</span>
     </div>
     <div class="role-btn" id="rbtn-architect" onclick="doPickRole('architect')">
-      <span class="role-icon">◆</span>
+      <span class="role-icon" style="color:#7F77DD">◆</span>
       <span class="role-name">建築師</span>
-      <span class="role-desc">地形・陷阱・控場</span>
+      <span class="role-desc">陷阱全知・放置牆壁</span>
     </div>
   </div>
 
@@ -223,46 +422,39 @@
     等待所有人選擇職業...
   </button>
   <div class="error" id="err-room"></div>
-  <div class="hint">★ 為房主 · 所有人選完職業後房主可開始</div>
+  <div class="hint">★ 為房主 · 一人也可單獨開始</div>
 </div>
 
-<!-- ══ 畫面 4：遊戲中（placeholder）══ -->
-<div class="screen" id="screen-game">
-  <div class="game-title" style="font-size:32px">載入中...</div>
-  <div class="hint" id="game-role-hint"></div>
-</div>
+<!-- ══ 畫面 4：遊戲中 ══ -->
+<div class="screen" id="screen-game"></div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="/game.js?v=0.3.0"></script>
 <script>
-// ── 狀態 ─────────────────────────────────────────────────────────────────────
+// ── 狀態 ──────────────────────────────────────────────────────────────────────
 var myName   = '';
 var myRole   = null;
 var roomCode = null;
 var isHost   = false;
 var socket   = io();
+var currentRoom = null;
 
-var ROLE_LABELS = {
-  scout: '斥候', fighter: '戰士', scholar: '學者', architect: '建築師',
-};
+var ROLE_LABELS = { scout: '斥候', fighter: '戰士', scholar: '學者', architect: '建築師' };
 
-// ── 畫面切換 ─────────────────────────────────────────────────────────────────
+// ── 畫面切換 ──────────────────────────────────────────────────────────────────
 function show(id) {
-  document.querySelectorAll('.screen').forEach(function(s) {
-    s.classList.remove('active');
-  });
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
   document.getElementById(id).classList.add('active');
+  document.body.classList.toggle('in-game', id === 'screen-game');
 }
 
-function setErr(id, msg) {
-  var el = document.getElementById(id);
-  if (el) el.textContent = msg || '';
-}
+function setErr(id, msg) { var el = document.getElementById(id); if (el) el.textContent = msg || ''; }
 
-// ── 畫面 1 ───────────────────────────────────────────────────────────────────
-document.getElementById('inp-name').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') submitName();
-});
+// ── Tutorial ───────────────────────────────────────────────────────────────────
+function openTutorial()  { document.getElementById('tutorial-overlay').classList.add('open'); }
+function closeTutorial() { document.getElementById('tutorial-overlay').classList.remove('open'); }
 
+// ── 畫面 1 ────────────────────────────────────────────────────────────────────
 function submitName() {
   var val = document.getElementById('inp-name').value.trim();
   if (!val) { setErr('err-name', '請輸入名字'); return; }
@@ -270,105 +462,121 @@ function submitName() {
   setErr('err-name', '');
   show('screen-lobby');
 }
+document.getElementById('btn-enter').addEventListener('click', submitName);
+document.getElementById('btn-tutorial').addEventListener('click', openTutorial);
+document.getElementById('inp-name').addEventListener('keydown', function(e) { if (e.key === 'Enter') submitName(); });
 
-// ── 畫面 2 ───────────────────────────────────────────────────────────────────
-document.getElementById('inp-code').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') doJoinRoom();
-});
+// ── 畫面 2 ────────────────────────────────────────────────────────────────────
+document.getElementById('inp-code').addEventListener('keydown', function(e) { if (e.key === 'Enter') doJoinRoom(); });
 
-function doCreateRoom() {
-  setErr('err-lobby', '');
-  socket.emit('create_room', { name: myName });
-}
-
-function doJoinRoom() {
+function doCreateRoom() { setErr('err-lobby', ''); socket.emit('create_room', { name: myName }); }
+function doJoinRoom()   {
   var code = document.getElementById('inp-code').value.trim().toUpperCase();
   if (code.length !== 4) { setErr('err-lobby', '房間代碼是 4 個字元'); return; }
   setErr('err-lobby', '');
   socket.emit('join_room', { name: myName, code: code });
 }
 
-// ── 畫面 3 ───────────────────────────────────────────────────────────────────
-function doPickRole(role) {
-  if (!roomCode) return;
-  socket.emit('pick_role', { role: role });
-}
-
-function doStartGame() {
-  if (!isHost) return;
-  socket.emit('start_game');
-}
+// ── 畫面 3 ────────────────────────────────────────────────────────────────────
+function doPickRole(role) { if (!roomCode) return; socket.emit('pick_role', { role: role }); }
+function doStartGame()    { if (!isHost) return; socket.emit('start_game'); }
 
 function renderRoom(room) {
-  // 更新代碼顯示
+  currentRoom = room;
   document.getElementById('disp-code').textContent = room.code;
-
-  // 計算哪些職業被選走
   var taken = {};
   room.players.forEach(function(p) { if (p.role) taken[p.role] = p.id; });
-
-  // 更新職業按鈕
   ['scout','fighter','scholar','architect'].forEach(function(role) {
     var btn = document.getElementById('rbtn-' + role);
     if (!btn) return;
-    var isMine   = myRole === role;
-    var takenOther = taken[role] && !isMine;
+    var isMine = myRole === role;
     btn.classList.toggle('selected', isMine);
-    btn.classList.toggle('taken',    takenOther);
+    btn.classList.toggle('taken', !!(taken[role] && !isMine));
   });
-
-  // 玩家列表
   var html = room.players.map(function(p) {
-    var isH    = p.id === room.hostId;
+    var isH = p.id === room.hostId;
     var rLabel = p.role ? ROLE_LABELS[p.role] : '未選擇';
-    var rClass = p.role ? p.role : 'none';
-    return '<div class="player-row">'
-      + '<span class="p-name">' + p.name + (isH ? '<span class="p-host">★</span>' : '') + '</span>'
-      + '<span class="p-role ' + rClass + '">' + rLabel + '</span>'
-      + '</div>';
+    var rClass = p.role || 'none';
+    return '<div class="player-row"><span class="p-name">' + p.name +
+      (isH ? '<span class="p-host">★</span>' : '') + '</span>' +
+      '<span class="p-role ' + rClass + '">' + rLabel + '</span></div>';
   }).join('');
   document.getElementById('player-list').innerHTML = html;
 
-  // 開始按鈕
-  var allPicked   = room.players.every(function(p) { return p.role !== null; });
-  var enough      = room.players.length >= 2;
-  var btnStart    = document.getElementById('btn-start');
+  var allPicked = room.players.every(function(p) { return p.role !== null; });
+  var enough    = room.players.length >= 1;
+  var btnStart  = document.getElementById('btn-start');
   btnStart.disabled = !(isHost && allPicked && enough);
-  if (!enough)         btnStart.textContent = '等待更多玩家加入...';
-  else if (!allPicked) btnStart.textContent = '等待所有人選擇職業...';
-  else if (!isHost)    btnStart.textContent = '等待房主開始...';
-  else                 btnStart.textContent = '開始遊戲 ▶';
+  if (!allPicked)   btnStart.textContent = '等待所有人選擇職業...';
+  else if (!isHost) btnStart.textContent = '等待房主開始...';
+  else              btnStart.textContent = '開始遊戲 ▶';
+}
+
+// ── End screen ────────────────────────────────────────────────────────────────
+function showEnd(result, players) {
+  GAME.stopGame();
+  var overlay = document.getElementById('end-overlay');
+  var titleEl = document.getElementById('end-title');
+  var subEl   = document.getElementById('end-sub');
+  var listEl  = document.getElementById('end-player-list');
+
+  titleEl.textContent = result === 'win' ? '勝利！' : '失敗';
+  titleEl.className   = 'end-title ' + (result === 'win' ? 'end-win' : 'end-lose');
+  subEl.textContent   = result === 'win' ? '全員成功逃出深淵！' : '未能逃脫，深淵將你吞噬…';
+
+  listEl.innerHTML = Object.values(players).map(function(p) {
+    return '<div class="end-player-row" style="border-color:' + (p.hp > 0 ? '#1a3020' : '#1a1a1a') + '">' +
+      '<span style="color:' + (ROLE_LABELS[p.role] ? '#aaa' : '#555') + '">' + p.name + '</span>' +
+      '<span style="font-size:10px;color:#555">' + (ROLE_LABELS[p.role] || '') + '</span>' +
+      '<span style="color:' + (p.hp > 0 ? '#1D9E75' : '#D85A30') + '">' + (p.hp > 0 ? p.hp + 'HP' : '陣亡') + '</span>' +
+      '</div>';
+  }).join('');
+
+  overlay.classList.add('open');
+}
+
+function returnToLobby() {
+  document.getElementById('end-overlay').classList.remove('open');
+  myRole   = null;
+  roomCode = null;
+  isHost   = false;
+  show('screen-lobby');
 }
 
 // ── Socket 事件 ───────────────────────────────────────────────────────────────
 socket.on('room_created', function(data) {
-  roomCode = data.code;
-  isHost   = true;
-  show('screen-room');
-  renderRoom(data.room);
+  roomCode = data.code; isHost = true;
+  show('screen-room'); renderRoom(data.room);
 });
 
 socket.on('room_joined', function(data) {
-  roomCode = data.code;
-  isHost   = false;
-  show('screen-room');
-  renderRoom(data.room);
+  roomCode = data.code; isHost = false;
+  show('screen-room'); renderRoom(data.room);
 });
 
-socket.on('room_updated', function(data) {
-  renderRoom(data.room);
-});
+socket.on('room_updated', function(data) { renderRoom(data.room); });
 
 socket.on('role_confirmed', function(data) {
-  myRole = data.role;
-  renderRoom(data.room);
+  myRole = data.role; renderRoom(data.room);
 });
 
 socket.on('game_start', function(data) {
+  var playerCount = data.room.players.length;
   show('screen-game');
-  document.getElementById('game-role-hint').textContent =
-    '你的職業：' + (ROLE_LABELS[myRole] || myRole);
-  // 之後這裡載入 Phaser 遊戲場景
+  GAME.initGame(socket, myRole, socket.id, playerCount);
+  GAME.onBeat(socket);
+});
+
+socket.on('game_state', function(state) {
+  GAME.setLatestState(state);
+});
+
+socket.on('level_up', function(data) {
+  GAME.showLevelBanner(data.completedLevel, data.nextLevel, data.maxLevel);
+});
+
+socket.on('game_end', function(data) {
+  showEnd(data.result, data.players);
 });
 
 socket.on('error_msg', function(data) {

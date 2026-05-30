@@ -3,7 +3,7 @@ var CONFIG = {
   // ── 房間 ──────────────────────────────────────────
   ROOM_CODE_LENGTH: 4,
   MAX_PLAYERS: 4,
-  MIN_PLAYERS_TO_START: 2,   // 測試用，之後改 4
+  MIN_PLAYERS_TO_START: 1,   // solo 可玩
 
   // ── 玩家血量（個人血量）──────────────────────────
   PLAYER_HP: {
