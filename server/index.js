@@ -18,8 +18,10 @@ const ORIGIN = process.env.CORS_ORIGIN || '*';
 const io     = new Server(server, { cors: { origin: ORIGIN } });
 
 app.use(express.static(path.join(__dirname, '../client')));
-app.get('/', (req, res) =>
-  res.sendFile(path.join(__dirname, '../client/index.html')));
+app.get('/', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, '../client/index.html'));
+});
 
 // ── Per-room game state & timer handles ──────────────────────────────────────
 const gameStates = new Map();   // code -> gameState

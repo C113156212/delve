@@ -463,6 +463,30 @@ function startTurn(gs) {
     const ai=MONSTER_AI[m.monsterType]||MONSTER_AI.basic;
     ai.decide(m,alivePlayers,gs);
   }
+
+  // Attack queue: each player can only be attacked by 1 monster per turn.
+  // Among monsters targeting the same player, the closest one attacks;
+  // the rest are demoted to '移' (they keep moving but don't strike).
+  const attackerPerTarget=new Map();
+  for(const m of gs.monsters){
+    if(m.hp<=0) continue;
+    const isAttack=m.stance&&m.stance!=='移'&&m.stance!=='全彈';
+    if(!isAttack||!m.nextTarget) continue;
+    const target=gs.players[m.nextTarget];
+    if(!target||target.hp<=0) continue;
+    const d=dist(m.x,m.y,target.x,target.y);
+    if(!attackerPerTarget.has(m.nextTarget)){
+      attackerPerTarget.set(m.nextTarget,{m,d});
+    } else {
+      const cur=attackerPerTarget.get(m.nextTarget);
+      if(d<cur.d){
+        cur.m.stance='移'; cur.m.rushMove2=false;
+        attackerPerTarget.set(m.nextTarget,{m,d});
+      } else {
+        m.stance='移';
+      }
+    }
+  }
 }
 
 // Called on beat BEATS_PER_TURN (last beat): execute everything.

@@ -333,15 +333,15 @@ function buildActionPad(socket, role) {
   const el = document.getElementById('g-action-pad');
   if (!el) return;
 
-  const canFight = (role==='fighter'||isSolo);
-  const actionButtons = canFight ? `
-    <div class="pad-label">戰鬥動作 (J K L / 1 2 3)</div>
+  const dmgNote = role==='fighter'||isSolo ? '35傷' : '20傷';
+  const actionButtons = `
+    <div class="pad-label">動作 (J K L / 1 2 3)${role!=='fighter'&&!isSolo?' <span style="color:#555;font-size:8px">'+dmgNote+'</span>':''}</div>
     <div class="action-row">
       <button class="act-btn" id="act-刺" onclick="window._setAct('刺')">刺<br><small>[J] 克黃</small></button>
       <button class="act-btn" id="act-斬" onclick="window._setAct('斬')">斬<br><small>[K] 克蒼</small></button>
       <button class="act-btn" id="act-架" onclick="window._setAct('架')">架<br><small>[L] 克赤</small></button>
       <button class="act-btn act-none" id="act-null" onclick="window._setAct(null)">無<br><small>[0] 移動</small></button>
-    </div>` : '';
+    </div>`;
 
   el.innerHTML=`
     <div class="pad-section">
@@ -614,14 +614,31 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   const r   = ts*vis.size;
   const si  = STANCE_INFO[m.stance];
 
-  // Idle squash & stretch (slime-like breathing)
-  const isIdle = !m.stance || m.stance==='移';
+  // Beat-synced squash & stretch
+  const beatAge = now - beatFlash;
   let scaleX=1, scaleY=1;
-  if (isIdle) {
-    const speed = {runner:320, brute:720, boss:950}[m.monsterType] || 480;
-    const breathe = Math.sin(now/speed + m.id*1.9);
-    scaleX = 1 + breathe*0.09;
-    scaleY = 1 - breathe*0.07;
+  const rawDp = displayPos.get('m_'+m.id);
+
+  if (lastBeat===1 && beatAge<420) {
+    // Telegraph beat: coil (compress + widen), all monsters
+    const t = beatAge/420;
+    const coil = Math.sin(t*Math.PI) * 0.14;
+    const moving = m.stance==='移' || (rawDp&&(rawDp.tx!==rawDp.sx||rawDp.ty!==rawDp.sy));
+    if (moving) { scaleX=1+coil*0.7; scaleY=1-coil; }
+    else        { scaleX=1+coil*0.5; scaleY=1+coil*0.5; } // attacker swells
+  } else if (lastBeat===2 && beatAge<MONSTER_ANIM_MS && rawDp &&
+             (rawDp.tx!==rawDp.sx||rawDp.ty!==rawDp.sy)) {
+    // Resolve beat: elongate along movement direction during slide
+    const t = beatAge/MONSTER_ANIM_MS;
+    const elong = Math.sin(t*Math.PI)*0.28;
+    const mdx=rawDp.tx-rawDp.sx, mdy=rawDp.ty-rawDp.sy;
+    if (Math.abs(mdx)>=Math.abs(mdy)) { scaleX=1+elong; scaleY=1-elong*0.4; }
+    else                               { scaleY=1+elong; scaleX=1-elong*0.4; }
+  } else if (!m.stance||m.stance==='移') {
+    // Idle: subtle breathing between beats
+    const speed={runner:350,brute:750,boss:1000}[m.monsterType]||520;
+    const b=Math.sin(now/speed+m.id*1.9)*0.04;
+    scaleX=1+b; scaleY=1-b*0.7;
   }
 
   // Draw body (scaled for idle, fixed for attacking stance)
@@ -1029,10 +1046,10 @@ function buildQuickMessages(socket, role) {
 // ── Role help ─────────────────────────────────────────────────────────────────
 
 const ROLE_HELP = {
-  scout:     'WASD 移動 · 右鍵標記位置\n你能看到所有怪物的姿態！\n通報戰士怪物的姿態',
+  scout:     'WASD 移動 · M 按住看全圖\nJ/K/L 攻擊(20傷) · Esc 停下\n右鍵標記位置',
   fighter:   'WASD 移動 · J/K/L 選擇動作\nJ=刺(克黃) K=斬(克蒼) L=架(克赤)\n0=純移動 · Esc=立即停下',
-  scholar:   '點「標記」減速怪物並通報姿態\n你能看到所有怪物的攻擊預告',
-  architect: 'WASD 移動 · 點地圖放牆\n你能看到完整地圖和陷阱',
+  scholar:   'WASD 移動 · J/K/L 攻擊(20傷)\n點「標記」減速怪物 · Esc 停下',
+  architect: 'WASD 移動 · J/K/L 攻擊(20傷)\n點地圖放牆 · Esc 停下',
 };
 
 function buildRoleHelp(role) {
