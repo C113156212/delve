@@ -359,7 +359,7 @@
 </div>
 
 <!-- ══ 版本號 ══ -->
-<div id="ver-badge">v1.1.2</div>
+<div id="ver-badge">v1.2.0</div>
 
 <!-- ══ 遊戲結束覆蓋層 ══ -->
 <div id="end-overlay">
@@ -372,7 +372,7 @@
 <!-- ══ 畫面 1：輸入名字 ══ -->
 <div class="screen active" id="screen-name">
   <div class="game-title">DELVE</div>
-  <div class="game-sub">合作 · 資訊差 · 即時溝通 · v1.1.2</div>
+  <div class="game-sub">合作 · 資訊差 · 即時溝通 · v1.2.0</div>
   <input id="inp-name" placeholder="輸入你的名字" maxlength="12" autocomplete="off">
   <button class="primary" id="btn-enter">進入遊戲</button>
   <button id="btn-tutorial" style="margin-top:4px;font-size:11px">? 新手說明</button>
@@ -522,9 +522,9 @@ function showEnd(result, players) {
   var subEl   = document.getElementById('end-sub');
   var listEl  = document.getElementById('end-player-list');
 
-  titleEl.textContent = result === 'win' ? '勝利！' : '失敗';
+  titleEl.textContent = result === 'win' ? '通關！' : '失敗';
   titleEl.className   = 'end-title ' + (result === 'win' ? 'end-win' : 'end-lose');
-  subEl.textContent   = result === 'win' ? '全員成功逃出深淵！' : '未能逃脫，深淵將你吞噬…';
+  subEl.textContent   = result === 'win' ? '恭喜！你們征服了深淵，深淵主宰已倒下！' : '未能逃脫，深淵將你吞噬…';
 
   listEl.innerHTML = Object.values(players).map(function(p) {
     return '<div class="end-player-row" style="border-color:' + (p.hp > 0 ? '#1a3020' : '#1a1a1a') + '">' +

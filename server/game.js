@@ -3,7 +3,7 @@ const { CONFIG } = require('../shared/config');
 
 const TILE = Object.freeze({ WALL: 0, FLOOR: 1, EXIT: 2, TRAP: 3 });
 
-const MAX_LEVEL     = 30;
+const MAX_LEVEL     = 27;
 const BEATS_PER_TURN = 8;   // 8-beat visual cycle; every beat resolves immediately
 const BEAT_MS       = 500;  // ms per beat → 2 beats/sec
 const COMBAT_RANGE  = 5;    // Manhattan distance to enter combat mode
@@ -11,64 +11,62 @@ const COMBAT_RANGE  = 5;    // Manhattan distance to enter combat mode
 // ── Level type system ─────────────────────────────────────────────────────────
 
 function getLevelType(level) {
-  if (level % 15 === 0) return 'boss';
-  if (level % 5  === 0) return 'special';
+  if (level % 9 === 0) return 'boss';
+  if (level % 3 === 0) return 'special';
   return 'normal';
 }
 
 function getSpecialSubtype(level) {
-  const idx = Math.floor(level / 5) - Math.floor(level / 15);
+  // Count special rooms so far, alternate rest/puzzle
+  const idx = Math.floor(level / 3) - Math.floor(level / 9);
   return idx % 2 === 1 ? 'rest' : 'puzzle';
 }
 
 function getLevelParams(level) {
   const type = getLevelType(level);
+
   if (type === 'boss') {
-    const bossNum = Math.floor(level / 15);
-    return { levelType:'boss', bossNum, monsters:1,
-      baseHp: 400+(bossNum-1)*350,  // 400 / 750 / 1100
-      baseDmg: 18+(bossNum-1)*4,    // 18 / 22 / 26
-      beatMs: 500,
-      timer:240, trapCount:4, types:['boss'] };
+    const tier = level / 9;  // 1, 2, 3
+    return { levelType:'boss', bossTier:tier, monsters:1,
+      baseHp:  [600, 900, 1200][tier-1],
+      baseDmg: [14,  20,  26  ][tier-1],
+      beatMs:  [700, 650, 600 ][tier-1],
+      timer:360, trapCount:0, types:['boss'] };
   }
+
   if (type === 'special') {
-    const sub = getSpecialSubtype(level);
-    const tier = Math.floor((level-1)/5);
+    const sub  = getSpecialSubtype(level);
+    const tier = Math.floor((level-1) / 9);  // 0, 1, 2
     if (sub === 'rest')
       return { levelType:'rest', monsters:0, baseHp:0, baseDmg:0, beatMs:500, timer:60, trapCount:0, types:[] };
-    return { levelType:'puzzle', monsters:2+tier, baseHp:40+tier*10, baseDmg:6+tier*2,
-      beatMs: tier <= 1 ? 650 : 500,
-      timer:120, trapCount:3+tier, types:['basic','runner','basic'] };
+    return { levelType:'puzzle', monsters:2+tier, baseHp:60+tier*40, baseDmg:8+tier*4,
+      beatMs:650-tier*50, timer:120, trapCount:0, types:['basic','runner','basic'] };
   }
 
-  const tier = Math.floor((level-1)/5);
-
-  // Beat speed: slow for early levels so players can learn RPS timing
-  const beatMs = tier === 0 ? 750    // levels 1–5:  relaxed
-               : tier === 1 ? 620    // levels 6–10: medium
-               :              500;   // levels 11+:  full speed
-
-  const pools = [
+  // Normal levels — tier 0-8 across 27 levels (every 3 levels = +1 tier)
+  const tier = Math.floor((level-1) / 3);
+  const POOLS = [
     ['basic'],
     ['basic','runner'],
-    ['basic','evader','runner'],
-    ['basic','runner','brute','evader'],
-    ['runner','brute','archer','evader'],
+    ['basic','runner','brute'],
+    ['runner','brute','evader'],
+    ['brute','archer','evader'],
     ['brute','archer','runner','evader'],
+    ['archer','brute','evader','runner'],
+    ['archer','brute','runner','evader'],
+    ['archer','brute','runner','evader'],
   ];
-  const pool  = pools[Math.min(tier, pools.length-1)];
+  const COUNTS   = [3, 4, 5, 6, 7, 8, 9, 10, 11];
+  const BEAT_ARR = [750, 700, 650, 620, 580, 550, 520, 500, 500];
 
-  // Gentler count & stat ramp: tier 0 starts at 3 monsters instead of 5
-  const counts = [3, 5, 7, 9, 11, 13];
-  const count  = counts[Math.min(tier, counts.length-1)];
-
-  return { levelType:'normal', monsters:count,
-    baseHp:  80 + tier*30,   // 80 / 110 / 140 / 170 / 200 / 230
-    baseDmg:  5 + tier*3,    //  5 /   8 /  11 /  14 /  17 /  20
-    beatMs,
-    timer: Math.max(90, 180 - tier*15),   // more time on early levels
-    trapCount: Math.max(2, 4 + tier*2),
-    types: Array.from({length:count}, (_,i) => pool[i%pool.length]) };
+  const t = Math.min(tier, POOLS.length-1);
+  return { levelType:'normal', monsters:COUNTS[t],
+    baseHp:  60 + t*25,
+    baseDmg:  5 + t*3,
+    beatMs: BEAT_ARR[t],
+    timer: Math.max(90, 180 - t*10),
+    trapCount: 0,
+    types: Array.from({length:COUNTS[t]}, (_,i) => POOLS[t][i % POOLS[t].length]) };
 }
 
 // ── RPS combat table ──────────────────────────────────────────────────────────
@@ -108,11 +106,28 @@ const MONSTER_PATTERNS = {
   brute:   ['移', '移', '黃', '移', '移', '黃', '移', '黃'],  // charges 2, heavy × 3
   evader:  ['閃', '移', '閃', '赤', '閃', '移', '閃', '赤'],  // odd=dodge, even=approach/attack
   archer:  ['射', '移', '射', '射', '休', '射', '移', '射'],
-  boss:    ['赤', '移', '蒼', '移', '黃', '移', '全彈', '移'],  // phase 1: 3 RPS + 1 bullet hell
+  boss:    [],  // boss uses BOSS_PATTERNS, not this array
 };
 
-// Boss phase 2 pattern (triggered at 50% HP): denser attacks
-const BOSS_PATTERN_P2 = ['赤', '蒼', '黃', '全彈', '赤', '蒼', '黃', '全彈'];
+// Per-tier boss patterns. p1=phase1, p2=phase2, p3=phase3 (boss3 only)
+const BOSS_PATTERNS = {
+  // Boss 1 "試煉巡衛" — telegraphed, learnable
+  1: {
+    p1: ['移','赤','移','蒼','休','移','黃','休'],
+    p2: ['赤','蒼','移','黃','赤','蒼','黃','移'],
+  },
+  // Boss 2 "狂獵者" — rushes 2 tiles in P2
+  2: {
+    p1: ['赤','黃','移','蒼','赤','休','黃','蒼'],
+    p2: ['赤','蒼','黃','赤','黃','蒼','赤','蒼'],
+  },
+  // Boss 3 "深淵主宰" — 3 phases, P3 full-auto rush
+  3: {
+    p1: ['赤','蒼','黃','移','赤','蒼','黃','休'],
+    p2: ['赤','黃','蒼','赤','蒼','黃','赤','黃'],
+    p3: ['蒼','赤','黃','蒼','赤','蒼','黃','赤'],
+  },
+};
 
 // ── Monster AI (telegraph phase only) ─────────────────────────────────────────
 // decide() sets m.stance and m.nextTarget for this turn.
@@ -184,19 +199,37 @@ const MONSTER_AI = {
 
   boss: {
     decide(m, players, gs) {
-      if (!gs.bossPhase2 && m.hp/m.maxHp < 0.5) {
-        gs.bossPhase2 = true;
-        m.patternIdx = 0;  // reset to phase 2 pattern
-        _msg(gs, `💀 BOSS 狂暴化！節奏改變！`, Date.now());
-      }
-      gs.windmillAngle = ((gs.windmillAngle||0) + (gs.bossPhase2 ? 0.5 : 0.3));
-      _updateWindmill(gs, m);
+      const tier = gs.bossTier || Math.round(gs.level / 9);
+      const hpFrac = m.hp / m.maxHp;
+      const now = Date.now();
+      const NAMES = ['試煉巡衛', '狂獵者', '深淵主宰'];
 
-      const pat = gs.bossPhase2 ? BOSS_PATTERN_P2 : MONSTER_PATTERNS.boss;
+      if (!gs.bossPhase2 && hpFrac < 0.5) {
+        gs.bossPhase2 = true;
+        m.patternIdx = 0;
+        gs.beatMs = [580, 520, 520][tier-1];
+        _msg(gs, `💀 ${NAMES[tier-1]} 進入第二形態！`, now);
+      }
+      if (tier >= 3 && !gs.bossPhase3 && hpFrac < 0.33) {
+        gs.bossPhase3 = true;
+        m.patternIdx = 0;
+        gs.beatMs = 430;
+        _msg(gs, '🔥 深淵主宰・終形態！全力阻止！', now);
+      }
+
+      const pats = BOSS_PATTERNS[tier] || BOSS_PATTERNS[1];
+      const pat = gs.bossPhase3 ? (pats.p3 || pats.p2) : gs.bossPhase2 ? pats.p2 : pats.p1;
+      m.currentPat = pat;
       m.stance = pat[m.patternIdx % pat.length];
       m.patternIdx++;
+
       const target = _balanced(m, players, gs.monsters);
       m.nextTarget = target?.id;
+
+      // Rush: boss2 P2 rushes on 赤/黃; boss3 P3 rushes on all attacks
+      const isAtk = m.stance!=='移'&&m.stance!=='休'&&m.stance!=='閃'&&m.stance!=='全彈';
+      m.rushMove2 = (tier===2 && gs.bossPhase2 && (m.stance==='赤'||m.stance==='黃'))
+                 || (tier>=3 && gs.bossPhase3 && isAtk);
     },
   },
 };
@@ -484,7 +517,8 @@ function createGameState(players, level=1) {
     players:gamePlayers, monsters:_spawnMonsters(grid,W,H,exitX,exitY,params,0),
     projectiles:[], projSeq:0,
     pings:[], messages:[], winner:null,
-    windmillAngle:0, windmillArms:[], bossPhase2:false,
+    windmillAngle:0, windmillArms:[], bossPhase2:false, bossPhase3:false,
+    bossTier:params.bossTier||0,
     isRestRoom:false, pressurePlates:null, exitOpen:undefined,
   };
 
@@ -544,7 +578,8 @@ function nextLevel(gs){
   gs.beat=0; gs.turn=0; gs.pendingActions={};
   gs.projectiles=[]; gs.projSeq=0;
   gs.messages=[]; gs.pings=[];
-  gs.windmillAngle=0; gs.windmillArms=[]; gs.bossPhase2=false; gs._restHealed=false;
+  gs.windmillAngle=0; gs.windmillArms=[]; gs.bossPhase2=false; gs.bossPhase3=false; gs._restHealed=false;
+  gs.bossTier=params.bossTier||0;
   gs.isRestRoom=false; gs.pressurePlates=null; gs.exitOpen=undefined;
 
   const typeLabel={boss:'【BOSS】',rest:'【休息室】',puzzle:'【謎題室】',normal:''};
@@ -1097,7 +1132,7 @@ function _monsterSnap(m, showStance, peekAhead=0) {
   const canSee = showStance || revealed;
   const nextSteps = [];
   if (canSee && peekAhead > 0) {
-    const pat = MONSTER_PATTERNS[m.monsterType] || MONSTER_PATTERNS.basic;
+    const pat = m.currentPat || MONSTER_PATTERNS[m.monsterType] || MONSTER_PATTERNS.basic;
     for (let i = 0; i < peekAhead; i++)
       nextSteps.push(pat[(m.patternIdx + i) % pat.length]);
   }
@@ -1152,7 +1187,7 @@ function filterStateForRole(gs, role, playerId) {
     timeLeft:Math.max(0,gs.startTime+gs.duration-now),
     players:playerSnap, pings:gs.pings, messages:gs.messages,
     W:gs.W, H:gs.H, projectiles:liveProj,
-    windmillArms:gs.windmillArms||[], bossPhase2:gs.bossPhase2||false,
+    windmillArms:[], bossPhase2:gs.bossPhase2||false, bossPhase3:gs.bossPhase3||false, bossTier:gs.bossTier||0,
     pressurePlates:gs.pressurePlates||null, exitOpen:gs.exitOpen, isRestRoom:gs.isRestRoom||false,
     myAction:gs.pendingActions[playerId]||null,
     combatResults:gs.combatResults||[], combatResultTs:gs.combatResultTs||0,
