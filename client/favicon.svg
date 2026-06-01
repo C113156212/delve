@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" fill="#0a0a0f" rx="4"/>
+  <!-- Diamond gem body -->
+  <polygon points="16,4 27,13 16,29 5,13" fill="#7F77DD"/>
+  <!-- Left/top facet (lighter) -->
+  <polygon points="16,4 5,13 16,17" fill="#9d97e8"/>
+  <!-- Top highlight -->
+  <polygon points="16,4 21,10 16,13 11,10" fill="#d0cef8" opacity="0.5"/>
+</svg>
