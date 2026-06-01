@@ -667,7 +667,16 @@ function resolveTurn(gs) {
               (m.stance&&dist(m.x,m.y,target.x,target.y)>1)){
       // Approach target
       const step1=stepToward(gs.grid,gs.W,gs.H,m.x,m.y,target.x,target.y);
-      if(!_blocked(m,step1.x,step1.y,gs)){m.x=step1.x;m.y=step1.y;}
+      if(!_blocked(m,step1.x,step1.y,gs)){
+        m.x=step1.x; m.y=step1.y;
+      } else {
+        // Attack-stance monster blocked by a passive ('移') monster: swap to let attacker through
+        const isAttacking=m.stance!=='移'&&m.stance!=='全彈'&&m.stance!=='休'&&m.stance!=='閃';
+        if(isAttacking){
+          const blocker=gs.monsters.find(o=>o.id!==m.id&&o.hp>0&&o.x===step1.x&&o.y===step1.y&&o.stance==='移');
+          if(blocker){const ox=m.x,oy=m.y; m.x=step1.x; m.y=step1.y; blocker.x=ox; blocker.y=oy;}
+        }
+      }
       if(m.rushMove2){
         const step2=stepToward(gs.grid,gs.W,gs.H,m.x,m.y,target.x,target.y);
         if(!_blocked(m,step2.x,step2.y,gs)){m.x=step2.x;m.y=step2.y;}

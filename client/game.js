@@ -880,7 +880,7 @@ function updateBeatUI(beat, socket) {
 
 function _recordQtePress() {
   if (!latestState?.inCombat) return;
-  qtePressT   = Math.min(0.999, Math.max(0, (performance.now() - beatFlash) / BEAT_MS));
+  qtePressT   = Math.min(0.999, Math.max(0, (performance.now() - beatFlash) / (latestState?.beatMs || BEAT_MS)));
   qteResultAt = performance.now();
 }
 
