@@ -304,6 +304,15 @@ function makeLcg(seed) {
   return (max)=>{ s=(1664525*s+1013904223)>>>0; return s%(max||1000); };
 }
 
+// ── Map dimensions ────────────────────────────────────────────────────────────
+
+function getMapDimensions(params) {
+  if (params.levelType === 'boss')   return { W: 26, H: 18 };
+  if (params.levelType === 'rest')   return { W: 16, H: 6 };
+  if (params.levelType === 'puzzle') return { W: 22, H: 6 };
+  return { W: Math.max(20, 8 + params.monsters * 4), H: 6 };
+}
+
 // ── Map generation ────────────────────────────────────────────────────────────
 
 function generateDungeon(W, H, trapCount=8) {
@@ -331,6 +340,31 @@ function generateDungeon(W, H, trapCount=8) {
     grid[ty][tx]=TILE.TRAP;
   }
   return {grid,traps,exitX:ex,exitY:ey};
+}
+
+function generateCorridor(W, H, trapCount=4) {
+  const grid = Array.from({length:H}, (_,y) =>
+    Array.from({length:W}, (_,x) =>
+      (x===0||y===0||x===W-1||y===H-1) ? TILE.WALL : TILE.FLOOR));
+  const rng = makeLcg(Date.now());
+  const numPillars = Math.floor((W - 12) / 7);
+  for (let i = 0; i < numPillars; i++) {
+    const bx = 7 + Math.floor(i * (W-14) / Math.max(1, numPillars));
+    const px = bx + rng(4) - 1;
+    const py = 1 + rng(H-2);
+    if (px > 6 && px < W-4 && grid[py]?.[px] === TILE.FLOOR)
+      grid[py][px] = TILE.WALL;
+  }
+  const traps=[]; const trapTypes=['spike','slow','push']; let tries=0;
+  while(traps.length < trapCount && tries++ < 400){
+    const tx=7+rng(W-12), ty=1+rng(H-2);
+    if(grid[ty]?.[tx] !== TILE.FLOOR) continue;
+    traps.push({x:tx,y:ty,type:trapTypes[rng(3)],triggered:false});
+    grid[ty][tx]=TILE.TRAP;
+  }
+  const exitX=W-2, exitY=Math.floor(H/2);
+  grid[exitY][exitX]=TILE.WALL;
+  return {grid,traps,exitX,exitY};
 }
 
 function generateBossArena(W,H){
@@ -389,13 +423,29 @@ function _spawnMonsters(grid,W,H,exitX,exitY,params,idStart){
     return [_makeMonster(idStart,{x:bx,y:by},'boss',params.baseHp)];
   }
   const rng=makeLcg(Date.now()^0xabcd), typeList=params.types||['basic'], monsters=[];
-  const spawnEdges=[()=>({x:exitX-1-rng(4),y:1+rng(H-2)}),()=>({x:1+rng(W-2),y:exitY-1-rng(3)})];
-  for(let i=0;i<params.monsters;i++){
-    let pos,t=0;
-    do{pos=spawnEdges[rng(2)]();t++;}
-    while(t<50&&(grid[pos.y]?.[pos.x]===TILE.WALL||dist(pos.x,pos.y,2,2)<5));
-    if(grid[pos.y]?.[pos.x]===TILE.WALL) continue;
-    monsters.push(_makeMonster(idStart+i,pos,typeList[i%typeList.length],params.baseHp));
+  const count=params.monsters;
+  if(H<=8){
+    // Corridor: distribute evenly along the length
+    for(let i=0;i<count;i++){
+      const t=(i+0.8)/(count+0.6);
+      const baseX=Math.floor(8+t*(exitX-10));
+      let pos, tries=0;
+      do{
+        pos={x:baseX+rng(5)-2, y:1+rng(H-2)};
+        tries++;
+      }while(tries<40&&(grid[pos.y]?.[pos.x]!==TILE.FLOOR||pos.x<7));
+      if(grid[pos.y]?.[pos.x]===TILE.FLOOR)
+        monsters.push(_makeMonster(idStart+i,pos,typeList[i%typeList.length],params.baseHp));
+    }
+  } else {
+    const spawnEdges=[()=>({x:exitX-1-rng(4),y:1+rng(H-2)}),()=>({x:1+rng(W-2),y:exitY-1-rng(3)})];
+    for(let i=0;i<count;i++){
+      let pos,t=0;
+      do{pos=spawnEdges[rng(2)]();t++;}
+      while(t<50&&(grid[pos.y]?.[pos.x]===TILE.WALL||dist(pos.x,pos.y,2,2)<5));
+      if(grid[pos.y]?.[pos.x]===TILE.WALL) continue;
+      monsters.push(_makeMonster(idStart+i,pos,typeList[i%typeList.length],params.baseHp));
+    }
   }
   return monsters;
 }
@@ -403,16 +453,18 @@ function _spawnMonsters(grid,W,H,exitX,exitY,params,idStart){
 // ── Game state factory ────────────────────────────────────────────────────────
 
 function createGameState(players, level=1) {
-  const W=26, H=18;
   const params=getLevelParams(level);
+  const {W,H}=getMapDimensions(params);
   let mapResult;
   if(params.levelType==='boss')        mapResult=generateBossArena(W,H);
   else if(params.levelType==='rest')   mapResult=generateRestRoom(W,H);
   else if(params.levelType==='puzzle') mapResult=generatePuzzleRoom(W,H);
-  else                                  mapResult=generateDungeon(W,H,params.trapCount);
+  else                                  mapResult=generateCorridor(W,H,params.trapCount);
   const {grid,traps,exitX,exitY}=mapResult;
 
-  const spawnPts=[{x:2,y:2},{x:3,y:2},{x:2,y:3},{x:3,y:3}];
+  const spawnPts = params.levelType==='boss'
+    ? [{x:2,y:2},{x:3,y:2},{x:2,y:3},{x:3,y:3}]
+    : [{x:2,y:1},{x:2,y:2},{x:2,y:3},{x:2,y:4}];
   const gamePlayers={};
   players.forEach((p,i)=>{
     const sp=spawnPts[i%spawnPts.length];
@@ -459,16 +511,20 @@ function createGameState(players, level=1) {
 function nextLevel(gs){
   gs.level=(gs.level||1)+1;
   const params=getLevelParams(gs.level);
+  const {W:newW,H:newH}=getMapDimensions(params);
+  gs.W=newW; gs.H=newH;
   let mapResult;
-  if(params.levelType==='boss')        mapResult=generateBossArena(gs.W,gs.H);
-  else if(params.levelType==='rest')   mapResult=generateRestRoom(gs.W,gs.H);
-  else if(params.levelType==='puzzle') mapResult=generatePuzzleRoom(gs.W,gs.H);
-  else                                  mapResult=generateDungeon(gs.W,gs.H,params.trapCount);
+  if(params.levelType==='boss')        mapResult=generateBossArena(newW,newH);
+  else if(params.levelType==='rest')   mapResult=generateRestRoom(newW,newH);
+  else if(params.levelType==='puzzle') mapResult=generatePuzzleRoom(newW,newH);
+  else                                  mapResult=generateCorridor(newW,newH,params.trapCount);
   gs.grid=mapResult.grid; gs.traps=mapResult.traps;
   gs.exitX=mapResult.exitX; gs.exitY=mapResult.exitY;
   gs.levelType=params.levelType;
 
-  const spawnPts=[{x:2,y:2},{x:3,y:2},{x:2,y:3},{x:3,y:3}];
+  const spawnPts = params.levelType==='boss'
+    ? [{x:2,y:2},{x:3,y:2},{x:2,y:3},{x:3,y:3}]
+    : [{x:2,y:1},{x:2,y:2},{x:2,y:3},{x:2,y:4}];
   let i=0;
   for(const p of Object.values(gs.players)){
     if(p.hp>0){

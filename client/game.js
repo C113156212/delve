@@ -94,6 +94,8 @@ let beatFlash   = 0;      // performance.now() of last beat event
 
 let qtePressT    = null;   // 0-1: beat position when player last pressed
 let qteResultAt  = null;   // performance.now() of that press
+let _soloCamOx   = 0;      // corridor solo camera: world X offset
+let _soloCamTs   = 20;     // corridor solo camera: tile size
 let prevInCombat = false;  // for detecting combat mode transitions
 let winStreak    = 0;      // consecutive 'win' results
 
@@ -348,6 +350,9 @@ function _playerScreenPos(canvas, state, now) {
 
   // Solo / full-map view (no localGrid)
   if (isSolo || !state.localGrid) {
+    if (state.H && state.H <= 8) {
+      return { x: (dp.x - _soloCamOx) * _soloCamTs + _soloCamTs/2, y: dp.y * _soloCamTs + _soloCamTs/2, ts: _soloCamTs };
+    }
     const ts = getTileSize(canvas, state.W || 26, state.H || 18);
     return { x: dp.x * ts + ts/2, y: dp.y * ts + ts/2, ts };
   }
@@ -489,23 +494,16 @@ function drawQTE(canvas, state, now) {
     const zx = barLeft + z.start * BAR_W;
     const zw = (z.end - z.start) * BAR_W;
     ctx.fillStyle = z.color; ctx.fillRect(zx, bTop, zw, BAR_H);
-    if (zw > 20) {
-      ctx.font = `${Math.max(6, BAR_W * 0.062)}px monospace`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.globalAlpha = 0.65; ctx.fillStyle = z.fg;
-      ctx.fillText(z.label, zx + zw/2, bTop + BAR_H/2);
-      ctx.globalAlpha = 1;
-    }
   }
   ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
   ctx.strokeRect(barLeft, bTop, BAR_W, BAR_H);
 
   // ── 3. Moving cursor — ▼ triangle sitting on TOP edge of bar ───────────────
+  const currentBeatMs = latestState?.beatMs || BEAT_MS;
   const t  = Math.min(0.999, Math.max(0, (now - beatFlash) / currentBeatMs));
   const cx = barLeft + t * BAR_W;
 
   // Beat-start flash: brief white wash on bar each new beat
-  const currentBeatMs = latestState?.beatMs || BEAT_MS;
   const beatAge = now - beatFlash;
   if (beatAge < 240) {
     const pulse = Math.max(0, 1 - beatAge / 240) * 0.28;
@@ -575,14 +573,6 @@ function drawQTE(canvas, state, now) {
       ctx.closePath();
       ctx.fillStyle = pz.fg; ctx.shadowColor = pz.fg; ctx.shadowBlur = 8;
       ctx.fill(); ctx.shadowBlur = 0;
-
-      // Rising zone label (rises DOWNWARD, away from player)
-      const rise = Math.min(1, age / 300) * 10;
-      ctx.font = `bold ${Math.max(9, BAR_W * 0.1)}px monospace`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = pz.fg; ctx.shadowColor = pz.fg; ctx.shadowBlur = 5;
-      ctx.fillText(pz.label, mx, bBot + 28 + rise);
-      ctx.shadowBlur = 0;
 
       ctx.restore();
     }
@@ -969,6 +959,12 @@ function canvasToTile(canvas, e, state) {
     const lx=Math.floor((e.clientX-rect.left)/ts);
     const ly=Math.floor((e.clientY-rect.top)/ts);
     return {tx:lx+(state.viewX||0), ty:ly+(state.viewY||0)};
+  }
+  if (state.H && state.H <= 8) {
+    return {
+      tx: Math.floor((e.clientX - rect.left) / _soloCamTs) + _soloCamOx,
+      ty: Math.floor((e.clientY - rect.top)  / _soloCamTs)
+    };
   }
   const ts=getTileSize(canvas,state.W,state.H);
   return {tx:Math.floor((e.clientX-rect.left)/ts), ty:Math.floor((e.clientY-rect.top)/ts)};
@@ -1487,9 +1483,31 @@ function buildScoutMapUI() {
 }
 
 function renderSolo(canvas, state, now) {
-  const ts=fitCanvas(canvas,state.W,state.H);
-  const ctx=canvas.getContext('2d');
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const isCorridor = state.H && state.H <= 8;
+  let ts, ox = 0;
+  if (isCorridor) {
+    const ph = canvas.parentElement?.clientHeight || window.innerHeight;
+    const pw = canvas.parentElement?.clientWidth  || window.innerWidth;
+    ts = Math.min(
+      Math.floor(Math.min(ph / state.H, pw / Math.max(state.H, 8))),
+      56
+    );
+    if (ts < 4) ts = 20;
+    const viewW = Math.min(state.W, Math.max(state.H, Math.floor(pw / ts)));
+    const me = state.players?.[gameId];
+    const dpMe = me ? getDisplayPos('p_'+gameId, me.x, me.y, now, PLAYER_ANIM_MS) : null;
+    const camX = dpMe ? dpMe.x : Math.floor(state.W / 2);
+    ox = Math.max(0, Math.min(state.W - viewW, camX - Math.floor(viewW / 2)));
+    canvas.width = ts * viewW;
+    canvas.height = ts * state.H;
+    _soloCamOx = ox; _soloCamTs = ts;
+  } else {
+    ts = fitCanvas(canvas, state.W, state.H);
+    _soloCamOx = 0; _soloCamTs = ts;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (isCorridor) { ctx.save(); ctx.translate(-ox * ts, 0); }
   drawGrid(ctx,state.grid,state.W,state.H,ts);
   if(state.traps) for(const t of state.traps) drawTrap(ctx,t,ts,true);
   if(state.pings) for(const p of state.pings){if(!p.bornAt)p.bornAt=performance.now();drawPing(ctx,p,ts,0,0,now);}
@@ -1500,6 +1518,7 @@ function renderSolo(canvas, state, now) {
   if(state.players) for(const p of Object.values(state.players)) drawPlayer(ctx,p,ts,p.id===gameId,0,0,now);
   drawProjectiles(ctx,state.projectiles,ts,0,0,now);
   drawEffects(ctx,ts,now,0,0); drawFloatingNums(ctx,ts,now,0,0);
+  if (isCorridor) ctx.restore();
 }
 
 // ── HUD ───────────────────────────────────────────────────────────────────────
