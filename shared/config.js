@@ -7,10 +7,10 @@ var CONFIG = {
 
   // ── 玩家血量（個人血量）──────────────────────────
   PLAYER_HP: {
-    scout:     80,
-    fighter:   120,
-    scholar:   70,
-    architect: 90,
+    scout:     100,
+    fighter:   150,
+    scholar:   90,
+    architect: 110,
   },
 
   // ── 計時（秒）────────────────────────────────────

@@ -239,12 +239,12 @@
     }
 
     /* ── Beat indicator ── */
-    #g-beat-row { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+    #g-beat-row { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
     .beat-label { font-size: 9px; color: #444; letter-spacing: 0.1em; }
     .beat-dot {
-      width: 14px; height: 14px; border-radius: 50%;
+      width: 10px; height: 10px; border-radius: 50%;
       background: #1a1a2e; border: 1px solid #2a2a4e;
-      transition: background 0.08s, box-shadow 0.08s;
+      transition: background 0.06s, box-shadow 0.06s;
       display: inline-block;
     }
     .beat-dot.beat-done    { background: #1D4030; border-color: #1D9E75; }
@@ -254,9 +254,9 @@
       animation: beat-pulse 0.3s ease-out;
     }
     .beat-dot.beat-resolve {
-      background: #D85A30;
-      box-shadow: 0 0 16px rgba(216,90,48,1), 0 0 5px #fff;
-      animation: beat-pulse 0.2s ease-out;
+      background: #1D9E75;
+      box-shadow: 0 0 12px rgba(29,158,117,0.9), 0 0 4px #fff;
+      animation: beat-pulse 0.3s ease-out;
     }
     @keyframes beat-pulse {
       from { transform: scale(1.9); }
@@ -339,25 +339,26 @@
     <div class="tut-title">DELVE — 操作說明</div>
     <div class="tut-role">
       <span class="tut-role-name" style="color:#1D9E75">▲ 斥候</span>
-      <span class="tut-role-desc">看到完整地圖、怪物位置。右鍵標記位置讓隊友知道方向。移動引路。</span>
+      <span class="tut-role-desc">全地圖視野。右鍵標記位置。近戰輸出較低，擅長引路偵察。</span>
       <span class="tut-role-name" style="color:#D85A30">■ 戰士</span>
-      <span class="tut-role-desc">唯一能攻擊的角色（空白鍵）。視野有限，需要斥候或學者告知怪物位置。</span>
+      <span class="tut-role-desc">近戰輸出最高。視野有限，需隊友通報敵情。爆發傷害首選。</span>
       <span class="tut-role-name" style="color:#BA7517">● 學者</span>
-      <span class="tut-role-desc">看到怪物的下一步行動（預告），點「標記」按鈕可讓怪物減速 5 秒。</span>
+      <span class="tut-role-desc">自動格擋所有近戰。格擋成功讓怪物易傷。點怪物標記使其減速。</span>
       <span class="tut-role-name" style="color:#7F77DD">◆ 建築師</span>
-      <span class="tut-role-desc">看到完整地圖與陷阱類型。點地圖放置牆壁（最多 4 面，8 秒冷卻）。</span>
+      <span class="tut-role-desc">全地圖視野+陷阱類型。點地圖放置牆壁阻擋怪物（最多3面）。</span>
     </div>
     <div style="font-size:11px;color:#444;line-height:1.8">
       目標：所有存活玩家同時走到出口（右下角）。<br>
-      怪物每 2 秒行動一次，會先預告 0.8 秒。<br>
-      一人模式擁有所有情報。快速訊息按鈕用於溝通。
+      WASD 自由走路。怪物靠近（5格內）進入戰鬥模式，依 beat 節拍行動。<br>
+      怪物出招時，玩家下方出現 QTE 條 — 看白色三角游標，對準綠色「最佳」區按招式！<br>
+      招式：架→克赤快攻 ／ 刺→克黃重擊 ／ 斬→克蒼穿刺
     </div>
     <button class="tut-close primary" onclick="closeTutorial()">了解了，開始遊戲</button>
   </div>
 </div>
 
 <!-- ══ 版本號 ══ -->
-<div id="ver-badge">v0.3.0</div>
+<div id="ver-badge">v1.0.0</div>
 
 <!-- ══ 遊戲結束覆蓋層 ══ -->
 <div id="end-overlay">
@@ -370,7 +371,7 @@
 <!-- ══ 畫面 1：輸入名字 ══ -->
 <div class="screen active" id="screen-name">
   <div class="game-title">DELVE</div>
-  <div class="game-sub">合作 · 資訊差 · 即時溝通</div>
+  <div class="game-sub">合作 · 資訊差 · 即時溝通 · v1.0.0</div>
   <input id="inp-name" placeholder="輸入你的名字" maxlength="12" autocomplete="off">
   <button class="primary" id="btn-enter">進入遊戲</button>
   <button id="btn-tutorial" style="margin-top:4px;font-size:11px">? 新手說明</button>
@@ -429,7 +430,7 @@
 <div class="screen" id="screen-game"></div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="/game.js?v=0.3.0"></script>
+<script src="/game.js?v=1.0.0"></script>
 <script>
 // ── 狀態 ──────────────────────────────────────────────────────────────────────
 var myName   = '';
@@ -572,7 +573,7 @@ socket.on('game_state', function(state) {
 });
 
 socket.on('level_up', function(data) {
-  GAME.showLevelBanner(data.completedLevel, data.nextLevel, data.maxLevel);
+  GAME.showLevelBanner(data.completedLevel, data.nextLevel, data.maxLevel, data.levelType);
 });
 
 socket.on('game_end', function(data) {

@@ -8,7 +8,7 @@ const { createRoom, joinRoom, pickRole, canStart, getRoom, setPhase, removePlaye
 const {
   createGameState, nextLevel, MAX_LEVEL, BEAT_MS, BEATS_PER_TURN,
   startTurn, resolveTurn, spawnWave,
-  submitPlayerAction, placeWall, markMonster, scoutPing, quickMsg,
+  submitPlayerAction, movePlayerFree, placeWall, markMonster, scoutPing, quickMsg,
   checkEndConditions, filterStateForRole,
 } = require('./game');
 
@@ -43,7 +43,7 @@ function handleResult(code, result, gs) {
   if (result === 'next_level') {
     const completedLevel = gs.level;
     gs.phase = 'transitioning';
-    io.to(code).emit('level_up', { completedLevel, nextLevel: completedLevel + 1, maxLevel: MAX_LEVEL });
+    io.to(code).emit('level_up', { completedLevel, nextLevel: completedLevel + 1, maxLevel: MAX_LEVEL, levelType: gs.levelType });
     setTimeout(() => {
       const gs2 = gameStates.get(code);
       if (!gs2) return;
@@ -69,27 +69,29 @@ function startGameTicks(code) {
     await broadcastGameState(code);
   }, BROADCAST_MS);
 
-  // Beat tick – drives the turn/rhythm system
+  // Beat tick – polls at 80ms but only fires when gs.beatMs has elapsed.
+  // This allows per-level beat speed without restarting the interval.
   let beatCount = 0;
+  let lastBeatTime = Date.now();
   const beat = setInterval(() => {
     const gs = gameStates.get(code);
     if (!gs || gs.phase === 'ended' || gs.phase === 'transitioning') return;
 
+    const now = Date.now();
+    const beatMs = gs.beatMs || BEAT_MS;
+    if (now - lastBeatTime < beatMs) return;
+    lastBeatTime = now;
+
     beatCount++;
-    gs.beat = ((beatCount - 1) % BEATS_PER_TURN) + 1;  // 1, 2, 3, 4, 1, 2, 3, 4 ...
+    gs.beat = ((beatCount - 1) % BEATS_PER_TURN) + 1;
 
-    if (gs.beat === 1) {
-      // New turn: monsters telegraph stances
-      startTurn(gs);
-    } else if (gs.beat === BEATS_PER_TURN) {
-      // Last beat: resolve all actions
-      resolveTurn(gs);
-      handleResult(code, checkEndConditions(gs), gs);
-    }
+    resolveTurn(gs);
+    const result = checkEndConditions(gs);
+    if (result) { handleResult(code, result, gs); return; }
+    startTurn(gs);
 
-    // Emit beat signal so clients can animate
     io.to(code).emit('beat', { beat: gs.beat, turn: gs.turn });
-  }, BEAT_MS);
+  }, 80);
 
   roomTimers.set(code, { broadcast, beat });
 }
@@ -153,6 +155,10 @@ io.on('connection', (socket) => {
     const code = socket.data.code;
     const gs   = gameStates.get(code);
     if (!gs || gs.phase !== 'playing') return;
+    // Out-of-combat: pure movement request → apply instantly, skip beat queue
+    if (!combatAction && !targetId) {
+      if (movePlayerFree(gs, socket.id, dx || 0, dy || 0)) return;
+    }
     submitPlayerAction(gs, socket.id, dx, dy, combatAction, targetId ?? null);
   });
 

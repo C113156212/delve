@@ -12,9 +12,21 @@ const STANCE_INFO = {
   '赤': { label:'赤', color:'#ff5544', desc:'快攻', counter:'架' },
   '蒼': { label:'蒼', color:'#4488ff', desc:'穿刺', counter:'斬' },
   '黃': { label:'黃', color:'#ffcc22', desc:'重擊', counter:'刺' },
-  '移': { label:'移', color:'#666666', desc:'移動', counter:'' },
-  '射': { label:'射', color:'#ffaa33', desc:'射擊', counter:'架/閃' },
+  '移': { label:'移', color:'#555577', desc:'靠近', counter:'' },
+  '閃': { label:'閃', color:'#cc55ff', desc:'閃避', counter:'遠程' },
+  '休': { label:'休', color:'#334455', desc:'休息', counter:'攻！' },
+  '射': { label:'射', color:'#ffaa33', desc:'射擊', counter:'架' },
   '全彈':{ label:'彈', color:'#ff2244', desc:'全圖彈目', counter:'閃開！' },
+};
+
+// Client-side mirror of server's MONSTER_PATTERNS for beat-track display
+const MONSTER_PATTERNS_CLIENT = {
+  basic:   ['赤','移','蒼','移','黃','移','移','休'],
+  runner:  ['赤','赤','赤','休','赤','赤','赤','休'],
+  brute:   ['移','移','黃','移','移','黃','移','黃'],  // charges 2, heavy ×3
+  evader:  ['閃','移','閃','赤','閃','移','閃','赤'],
+  archer:  ['射','移','射','射','休','射','移','射'],
+  boss:    ['赤','移','蒼','移','黃','移','全彈','移'],
 };
 
 const ACTION_INFO = {
@@ -24,17 +36,40 @@ const ACTION_INFO = {
   null: { label:'無', color:'#555555', key:'0', desc:'純移動' },
 };
 
+// RPS result table (mirrored from server for client-side preview)
+const STANCE_RESULT = {
+  '刺': { '赤':'lose','蒼':'clash','黃':'win','移':'win','射':'lose' },
+  '斬': { '赤':'clash','蒼':'win','黃':'lose','移':'win','射':'lose' },
+  '架': { '赤':'win','蒼':'lose','黃':'clash','移':'win','射':'block' },
+  null: { '赤':'lose','蒼':'lose','黃':'lose','移':'none','射':'lose' },
+};
+const RESULT_COLOR = { win:'#44ff88', clash:'#ffcc22', lose:'#ff4444', block:'#44aaff', none:'#555' };
+const RESULT_LABEL = { win:'克', clash:'拍', lose:'敗', block:'格', none:'—' };
+
 const MONSTER_VIS = {
-  basic:  { color:'#cc4444', bgColor:'#6b1010', size:0.38 },
-  runner: { color:'#ff7755', bgColor:'#6b2010', size:0.30 },
-  brute:  { color:'#bb66ee', bgColor:'#3b1060', size:0.46 },
-  archer: { color:'#ddaa33', bgColor:'#5b4010', size:0.33 },
-  boss:   { color:'#ff2244', bgColor:'#550011', size:0.55 },
+  basic:  { color:'#dd3333', bgColor:'#550a0a', size:0.38 },  // 紅
+  runner: { color:'#ff8800', bgColor:'#5a2a00', size:0.30 },  // 橙
+  brute:  { color:'#5566ff', bgColor:'#12184a', size:0.46 },  // 藍
+  evader: { color:'#22cc88', bgColor:'#0a3a22', size:0.32 },  // 翠綠
+  archer: { color:'#ddbb22', bgColor:'#3a3000', size:0.33 },  // 金
+  boss:   { color:'#ff1155', bgColor:'#440010', size:0.55 },  // 深紅
 };
 
 const PLAYER_ANIM_MS  = 140;
-const MONSTER_ANIM_MS = 280;
-const BEATS_PER_TURN  = 2;
+const MONSTER_ANIM_MS = 220;
+const BEATS_PER_TURN  = 8;
+const BEAT_MS         = 500;  // must match server
+
+// QTE timing zones (fraction of one beat = 500 ms)
+const QTE_ZONES = [
+  { start:0.00, end:0.22, label:'太早', color:'rgba(200,55,35,0.42)',  fg:'#ff6644' },
+  { start:0.22, end:0.58, label:'可以', color:'rgba(185,150,20,0.38)', fg:'#ffcc33' },
+  { start:0.58, end:0.88, label:'最佳', color:'rgba(28,165,75,0.44)',  fg:'#44ee88' },
+  { start:0.88, end:1.00, label:'危險', color:'rgba(200,55,35,0.42)',  fg:'#ff6644' },
+];
+function _qteZone(t) {
+  return QTE_ZONES.find(z => t <= z.end) || QTE_ZONES[QTE_ZONES.length - 1];
+}
 
 // ── Game state ───────────────────────────────────────────────────────────────
 
@@ -56,6 +91,15 @@ let pendingDy   = 0;
 let pendingAct  = null;   // '刺'|'斬'|'架'|null
 let lastBeat    = 0;
 let beatFlash   = 0;      // performance.now() of last beat event
+
+let qtePressT    = null;   // 0-1: beat position when player last pressed
+let qteResultAt  = null;   // performance.now() of that press
+let prevInCombat = false;  // for detecting combat mode transitions
+let winStreak    = 0;      // consecutive 'win' results
+
+const dyingMonsters = new Map(); // id → {snap, diedAt} — death animation
+const playerHurtAt  = new Map(); // id → timestamp — hurt shake/tint
+let   screenShake   = null;      // {startAt, until, strength} | null
 
 // ── Smooth movement ───────────────────────────────────────────────────────────
 
@@ -105,14 +149,18 @@ function updateEffects(prev, next, now) {
     lastCombatResultTs = next.combatResultTs;
     for (const r of next.combatResults) {
       if (r.result === 'win') {
+        winStreak++;
         _addFlash(r.mx, r.my, '#ffe844', 400);
         _addRing(r.mx, r.my, '#44ff88', 550);
         _addFloat('反制！', r.mx, r.my - 0.6, '#ffe844', true);
+        if (winStreak >= 3) _addFloat(`${winStreak}連擊!!`, r.px, r.py - 1.2, '#ff9900', true);
       } else if (r.result === 'clash') {
+        winStreak = 0;
         _addFlash(r.mx, r.my, '#ff9944', 350);
         _addFlash(r.px, r.py, '#ff9944', 350);
         _addFloat('互拍！', r.mx, r.my - 0.6, '#ff9944', true);
       } else if (r.result === 'lose') {
+        winStreak = 0;
         _addFlash(r.px, r.py, '#ff2200', 400);
         _addRing(r.px, r.py, '#ff4444', 500);
       } else if (r.result === 'block') {
@@ -122,20 +170,43 @@ function updateEffects(prev, next, now) {
     }
   }
 
-  // HP-change damage numbers
+  // HP-change damage numbers + monster death burst
   for (const m of (next.monsters||[])) {
     const pm = prev.monsters?.find(x=>x.id===m.id);
-    if (pm && pm.hp > m.hp && m.hp >= 0) {
-      const dp = displayPos.get('m_'+m.id) || { x:m.x, y:m.y };
+    if (!pm) continue;
+    const dp = displayPos.get('m_'+m.id) || { x:m.x, y:m.y };
+    if (pm.hp > m.hp && m.hp > 0) {
       _addFloat(`-${pm.hp-m.hp}`, dp.x, dp.y - 0.4, '#ff8888');
+    }
+    if (pm.hp > 0 && m.hp === 0) {
+      // Monster died — burst effect + big float + death animation
+      const col = (MONSTER_VIS[m.monsterType]||MONSTER_VIS.basic).color;
+      effects.push({ px:dp.x, py:dp.y, color:col, t0:now, dur:800, type:'burst' });
+      _addFloat('擊倒!', dp.x, dp.y - 0.8, '#ffe844', true);
+      const dpSnap = displayPos.get('m_'+m.id);
+      dyingMonsters.set(m.id, { snap:{ ...pm, x: dpSnap?.tx ?? m.x, y: dpSnap?.ty ?? m.y }, diedAt:now });
     }
   }
   for (const [id, p] of Object.entries(next.players||{})) {
     const pp = prev.players?.[id];
-    if (pp && pp.hp > p.hp) {
-      const dp = displayPos.get('p_'+id) || { x:p.x, y:p.y };
-      _addFloat(`-${pp.hp-p.hp}`, dp.x, dp.y - 0.4, '#ffbb55');
+    if (!pp) continue;
+    const dp = displayPos.get('p_'+id) || { x:p.x, y:p.y };
+    if (pp.hp > p.hp && p.hp > 0) {
+      const dmgTaken = pp.hp - p.hp;
+      _addFloat(`-${dmgTaken}`, dp.x, dp.y - 0.4, '#ffbb55');
+      if (dmgTaken >= 15) _addRing(p.x, p.y, '#ff2200', 600);
+      playerHurtAt.set(id, now);
+      if (dmgTaken >= 10 && !screenShake)
+        screenShake = { startAt: now, until: now + 360, strength: Math.min(7, dmgTaken * 0.28) };
     }
+    if (pp.hp > 0 && p.hp === 0) {
+      effects.push({ px:p.x, py:p.y, color:'#ff4444', t0:now, dur:800, type:'burst' });
+      _addFloat('💀', p.x, p.y - 1, '#ff4444', true);
+    }
+  }
+  // Combat mode transition — brief red vignette on entering combat
+  if (!prev.inCombat && next.inCombat) {
+    effects.push({ color:'#ff2244', t0:now, dur:500, type:'vignette' });
   }
 }
 
@@ -143,21 +214,60 @@ function drawEffects(ctx, ts, now, ox, oy) {
   effects = effects.filter(e => now - e.t0 < e.dur);
   for (const e of effects) {
     const t = (now - e.t0) / e.dur;
-    const cx = (e.px - (ox||0)) * ts + ts/2;
-    const cy = (e.py - (oy||0)) * ts + ts/2;
     ctx.save();
-    if (e.type === 'flash') {
-      const a = Math.max(0, 1 - t);
-      const r = ts * (0.25 + t * 0.5);
-      ctx.globalAlpha = a * 0.75;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
-      ctx.fillStyle = e.color; ctx.fill();
+
+    if (e.type === 'vignette') {
+      // Full-canvas edge flash (combat entry warning)
+      const cv = ctx.canvas;
+      const alpha = Math.max(0, (1 - t) * (1 - t) * 0.5);
+      const grad = ctx.createRadialGradient(
+        cv.width/2, cv.height/2, cv.height * 0.2,
+        cv.width/2, cv.height/2, cv.height * 0.75);
+      grad.addColorStop(0, 'transparent');
+      grad.addColorStop(1, e.color);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, cv.width, cv.height);
+    } else if (e.type === 'burst') {
+      const bx = (e.px - (ox||0)) * ts + ts/2;
+      const by = (e.py - (oy||0)) * ts + ts/2;
+      const ease = 1 - (1-t)*(1-t);
+      // 16 particles: alternating large/small at different speeds
+      for (let i = 0; i < 16; i++) {
+        const ang  = (i / 16) * Math.PI * 2;
+        const large = i % 2 === 0;
+        const spd  = large ? 1.35 : 0.75;
+        const px2  = bx + Math.cos(ang) * ts * spd * ease;
+        const py2  = by + Math.sin(ang) * ts * spd * ease;
+        const r2   = Math.max(1, ts * (large ? 0.18 : 0.09) * (1 - t * 0.65));
+        ctx.globalAlpha = Math.max(0, (1 - t) * (large ? 0.88 : 0.55));
+        ctx.beginPath(); ctx.arc(px2, py2, r2, 0, Math.PI*2);
+        ctx.fillStyle = large ? e.color : '#ffffff'; ctx.fill();
+      }
+      // Expanding ring
+      ctx.globalAlpha = Math.max(0, (1 - t * 1.3) * 0.55);
+      ctx.beginPath(); ctx.arc(bx, by, ts * 0.55 * ease, 0, Math.PI*2);
+      ctx.strokeStyle = e.color; ctx.lineWidth = 2.5; ctx.stroke();
+      // Central flash
+      ctx.globalAlpha = Math.max(0, (1 - t * 2.2) * 0.75);
+      ctx.beginPath(); ctx.arc(bx, by, ts * 0.48, 0, Math.PI*2);
+      ctx.fillStyle = '#ffffff'; ctx.fill();
     } else {
-      const a = Math.max(0, (1 - t) * 0.9);
-      const r = ts * (0.28 + t * 0.72);
-      ctx.globalAlpha = a;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
-      ctx.strokeStyle = e.color; ctx.lineWidth = 3; ctx.stroke();
+      const cx = (e.px - (ox||0)) * ts + ts/2;
+      const cy = (e.py - (oy||0)) * ts + ts/2;
+      if (e.type === 'flash') {
+        const a = Math.max(0, 1 - t);
+        const r = ts * (0.25 + t * 0.5);
+        ctx.globalAlpha = a * 0.75;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.fillStyle = e.color; ctx.fill();
+      } else {
+        const a = Math.max(0, (1 - t) * 0.9);
+        const r = ts * (0.28 + t * 0.72);
+        ctx.globalAlpha = a;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.strokeStyle = e.color; ctx.lineWidth = 3; ctx.stroke();
+      }
     }
     ctx.restore();
   }
@@ -183,6 +293,302 @@ function drawFloatingNums(ctx, ts, now, ox, oy) {
     ctx.fillText(f.text, cx, cy);
     ctx.restore();
   }
+}
+
+// ── Dying monster death animation ────────────────────────────────────────────
+
+function drawDyingMonsters(ctx, ts, now, ox, oy) {
+  const DEATH_DUR = 620;
+  for (const [id, d] of dyingMonsters) {
+    const age = now - d.diedAt;
+    if (age > DEATH_DUR) { dyingMonsters.delete(id); continue; }
+    const t   = age / DEATH_DUR;
+    const vis = MONSTER_VIS[d.snap.monsterType] || MONSTER_VIS.basic;
+    const r   = ts * vis.size * Math.max(0, 1 - t * 1.25);
+    if (r < 1) continue;
+    const cx  = (d.snap.x - (ox||0)) * ts + ts/2;
+    const cy  = (d.snap.y - (oy||0)) * ts + ts/2;
+    const rot = t * Math.PI * 2.8;
+    const a   = Math.max(0, 1 - t * 1.4);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(cx, cy);
+    ctx.rotate(rot);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2);
+    ctx.fillStyle = vis.bgColor; ctx.fill();
+    ctx.strokeStyle = vis.color; ctx.lineWidth = 1.5; ctx.stroke();
+    const xs = r * 0.6;
+    ctx.strokeStyle = vis.color; ctx.lineWidth = Math.max(1.5, r * 0.35);
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-xs, -xs); ctx.lineTo(xs, xs); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xs, -xs); ctx.lineTo(-xs, xs); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ── Screen shake (CSS-level) ──────────────────────────────────────────────────
+
+function _tickShake(canvas, now) {
+  if (!screenShake) return;
+  if (now >= screenShake.until) { screenShake = null; canvas.style.transform = ''; return; }
+  const t = (now - screenShake.startAt) / (screenShake.until - screenShake.startAt);
+  const decay = Math.exp(-t * 5);
+  const sx = Math.round(screenShake.strength * decay * Math.sin(t * 47));
+  const sy = Math.round(screenShake.strength * decay * Math.sin(t * 59 + 1.8));
+  canvas.style.transform = `translate(${sx}px, ${sy}px)`;
+}
+
+// ── QTE timing bar ────────────────────────────────────────────────────────────
+
+// Returns player's canvas pixel position for the current role's viewport.
+function _playerScreenPos(canvas, state, now) {
+  const myPlayer = state.players?.[gameId];
+  if (!myPlayer) return null;
+  const dp = getDisplayPos('p_'+gameId, myPlayer.x, myPlayer.y, now, PLAYER_ANIM_MS);
+
+  // Solo / full-map view (no localGrid)
+  if (isSolo || !state.localGrid) {
+    const ts = getTileSize(canvas, state.W || 26, state.H || 18);
+    return { x: dp.x * ts + ts/2, y: dp.y * ts + ts/2, ts };
+  }
+
+  const span = state.localGrid.length;
+  const VIEW = Math.floor(span / 2);
+  const ts   = getTileSize(canvas, span, span);
+
+  // Fighter: camera always follows self → player at canvas centre
+  if (gameRole === 'fighter') {
+    return { x: canvas.width / 2, y: canvas.height / 2, ts };
+  }
+
+  // Scout / architect / scholar: camera follows fighter (or self for scholar)
+  const camPlayer = gameRole === 'scholar'
+    ? myPlayer
+    : (Object.values(state.players || {}).find(p => p.role === 'fighter') || myPlayer);
+  const camDp = getDisplayPos('p_'+camPlayer.id, camPlayer.x, camPlayer.y, now, PLAYER_ANIM_MS);
+  const ox = camDp.x - VIEW, oy = camDp.y - VIEW;
+  return { x: (dp.x - ox) * ts + ts/2, y: (dp.y - oy) * ts + ts/2, ts };
+}
+
+// Draw QTE timing bar BELOW the player (doesn't cover monster stances above).
+function drawQTE(canvas, state, now) {
+  const myPlayer = state.players?.[gameId];
+  if (!myPlayer || myPlayer.hp <= 0) return;
+
+  // Show QTE for d<=2 — monsters at d=2 move adjacent and attack in the SAME beat
+  const adjacent = (state.monsters || []).filter(m => {
+    if (m.hp <= 0 || !m.stance) return false;
+    const d = Math.abs(m.x - myPlayer.x) + Math.abs(m.y - myPlayer.y);
+    return d <= 2 && m.stance !== '移' && m.stance !== '休' && m.stance !== '全彈' && m.stance !== '閃';
+  });
+  if (!adjacent.length) return;
+  // Sort by distance so the closest (most urgent) monster is shown first
+  adjacent.sort((a,b) =>
+    (Math.abs(a.x-myPlayer.x)+Math.abs(a.y-myPlayer.y)) -
+    (Math.abs(b.x-myPlayer.x)+Math.abs(b.y-myPlayer.y)));
+
+  const spos = _playerScreenPos(canvas, state, now);
+  if (!spos) return;
+
+  const ctx = canvas.getContext('2d');
+  const { x: pcx, y: pcy, ts } = spos;
+
+  const BAR_W   = Math.max(94, ts * 5.8);
+  const BAR_H   = 14;
+  const playerR = ts * 0.35;
+  const barLeft = pcx - BAR_W / 2;
+
+  // ── Layout BELOW the player (top→down): player ▸ hint ▸ ▼cursor ▸ bar ──────
+  //   hintY  = just below player circle
+  //   barTop = below hint + cursor triangle
+  //   barBot = barTop + BAR_H
+  const hintY  = pcy + playerR + 14;
+  const barTop = hintY + 14;
+  const barBot = barTop + BAR_H;
+
+  // Clamp to canvas so bar doesn't go off bottom
+  const overflow = barBot + 2 - canvas.height;
+  const shift    = overflow > 0 ? overflow : 0;
+  const hY  = hintY  - shift;
+  const bTop = barTop - shift;
+  const bBot = barBot - shift;
+
+  ctx.save();
+
+  // Dark background behind entire QTE widget for readability
+  ctx.fillStyle = 'rgba(0,0,4,0.72)';
+  ctx.beginPath();
+  const bgPad = 6, bgX = barLeft - bgPad, bgY = hY - 10;
+  const bgW = BAR_W + bgPad*2, bgH = bBot + 8 - bgY;
+  ctx.roundRect ? ctx.roundRect(bgX, bgY, bgW, bgH, 5) : ctx.rect(bgX, bgY, bgW, bgH);
+  ctx.fill();
+
+  // ── 1. Hint: 【stance】▶【counter】 ────────────────────────────────────────
+  const m = adjacent[0];
+  const si = STANCE_INFO[m.stance] || {};
+  const counter = (si.counter === '遠程' || !si.counter) ? '攻！' : si.counter;
+  const ai = ACTION_INFO[counter];
+  const hfs = Math.max(8, BAR_W * 0.1);
+
+  ctx.textBaseline = 'middle';
+  const stStr = `【${m.stance}】`, ctStr = `【${counter}】`;
+  ctx.font = `bold ${hfs * 1.05}px monospace`;
+  const stW = ctx.measureText(stStr).width;
+  const ctW = ctx.measureText(ctStr).width;
+  ctx.font = `${hfs * 0.78}px monospace`;
+  const arW = ctx.measureText('▶').width;
+  const totalW = stW + arW + ctW + 8;
+  let hx = pcx - totalW / 2;
+
+  // Key binding hint: 刺=[J] 斬=[K] 架=[L]
+  const keyHint = {'刺':'[J]','斬':'[K]','架':'[L]'};
+  const ctKey = keyHint[counter] || '';
+
+  ctx.font = `bold ${hfs * 1.05}px monospace`; ctx.textAlign = 'left';
+  ctx.fillStyle = si.color || '#aaa'; ctx.shadowColor = si.color; ctx.shadowBlur = 4;
+  ctx.fillText(stStr, hx, hY); hx += stW + 3; ctx.shadowBlur = 0;
+
+  ctx.font = `${hfs * 0.78}px monospace`; ctx.fillStyle = '#444';
+  ctx.fillText('▶', hx, hY); hx += arW + 3;
+
+  ctx.font = `bold ${hfs * 1.05}px monospace`;
+  ctx.fillStyle = ai?.color || '#aaa'; ctx.shadowColor = ai?.color; ctx.shadowBlur = 4;
+  ctx.fillText(ctStr, hx, hY); hx += ctx.measureText(ctStr).width; ctx.shadowBlur = 0;
+
+  if (ctKey) {
+    ctx.font = `${hfs * 0.82}px monospace`; ctx.fillStyle = '#777';
+    ctx.fillText(ctKey, hx + 2, hY);
+    hx += ctx.measureText(ctKey).width + 4;
+  }
+  if (adjacent.length > 1) {
+    ctx.font = `${hfs * 0.82}px monospace`; ctx.fillStyle = '#ff6644';
+    ctx.fillText(` +${adjacent.length - 1}`, hx + ctW + 2, hY);
+  }
+
+  // Next-beat preview: show upcoming stances as small badges to the right
+  if (m.nextSteps?.length) {
+    const previewX = barLeft + BAR_W + 6;
+    const previewFs = Math.max(6, hfs * 0.82);
+    ctx.font = `${previewFs * 0.75}px monospace`;
+    ctx.fillStyle = '#333'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('次：', previewX, hY);
+    const lblW = ctx.measureText('次：').width;
+    let px2 = previewX + lblW;
+    for (let i = 0; i < Math.min(m.nextSteps.length, 2); i++) {
+      const ns = m.nextSteps[i];
+      const nsi = STANCE_INFO[ns] || {};
+      ctx.font = `bold ${previewFs}px monospace`;
+      ctx.fillStyle = nsi.color || '#888';
+      ctx.fillText(ns, px2, hY);
+      px2 += ctx.measureText(ns).width + 3;
+    }
+  }
+
+  // ── 2. Timing zone bands ────────────────────────────────────────────────────
+  for (const z of QTE_ZONES) {
+    const zx = barLeft + z.start * BAR_W;
+    const zw = (z.end - z.start) * BAR_W;
+    ctx.fillStyle = z.color; ctx.fillRect(zx, bTop, zw, BAR_H);
+    if (zw > 20) {
+      ctx.font = `${Math.max(6, BAR_W * 0.062)}px monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = 0.65; ctx.fillStyle = z.fg;
+      ctx.fillText(z.label, zx + zw/2, bTop + BAR_H/2);
+      ctx.globalAlpha = 1;
+    }
+  }
+  ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
+  ctx.strokeRect(barLeft, bTop, BAR_W, BAR_H);
+
+  // ── 3. Moving cursor — ▼ triangle sitting on TOP edge of bar ───────────────
+  const t  = Math.min(0.999, Math.max(0, (now - beatFlash) / currentBeatMs));
+  const cx = barLeft + t * BAR_W;
+
+  // Beat-start flash: brief white wash on bar each new beat
+  const currentBeatMs = latestState?.beatMs || BEAT_MS;
+  const beatAge = now - beatFlash;
+  if (beatAge < 240) {
+    const pulse = Math.max(0, 1 - beatAge / 240) * 0.28;
+    ctx.globalAlpha = pulse; ctx.fillStyle = '#ffffff';
+    ctx.fillRect(barLeft, bTop, BAR_W, BAR_H);
+    ctx.globalAlpha = 1;
+  }
+
+  // Cursor glow through bar
+  ctx.globalAlpha = 0.28; ctx.fillStyle = '#fff';
+  ctx.fillRect(cx - 3, bTop, 6, BAR_H);
+  ctx.globalAlpha = 1;
+
+  // Cursor trail — 3 fading ghost triangles behind the main cursor
+  for (let i = 3; i >= 1; i--) {
+    const tp = Math.max(0, t - i * 0.045);
+    const tx2 = barLeft + tp * BAR_W;
+    ctx.globalAlpha = 0.12 / i;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(tx2 - (6-i), bTop - (11-i*2));
+    ctx.lineTo(tx2 + (6-i), bTop - (11-i*2));
+    ctx.lineTo(tx2,          bTop);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Cursor colour: white normally, green pulse in 最佳 zone, red in 危險
+  const curZone = _qteZone(t);
+  const curCol = curZone.label === '最佳' ? '#66ffaa'
+               : curZone.label === '危險' ? '#ff6644'
+               : '#ffffff';
+  const curPulse = curZone.label === '最佳' ? (0.6 + 0.4 * Math.sin(now / 55)) : 1;
+
+  // ▼ Main cursor triangle: base above bar, tip pointing DOWN to bar top edge
+  ctx.fillStyle = curCol; ctx.shadowColor = curCol; ctx.shadowBlur = 8 + curPulse * 6;
+  ctx.beginPath();
+  ctx.moveTo(cx - 7, bTop - 12);
+  ctx.lineTo(cx + 7, bTop - 12);
+  ctx.lineTo(cx,     bTop);
+  ctx.closePath(); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Thin bright line through bar (also colour-matched)
+  ctx.fillStyle = curCol; ctx.globalAlpha = 0.88;
+  ctx.fillRect(cx - 1, bTop, 2, BAR_H);
+  ctx.globalAlpha = 1;
+
+  // ── 4. Press marker — vertical line + ◆ below bar + rising zone label ──────
+  if (qtePressT !== null && qteResultAt !== null) {
+    const age   = now - qteResultAt;
+    const alpha = Math.min(1, age / 55) * Math.max(0, 1 - age / 1800);
+    if (alpha > 0.02) {
+      const pz = _qteZone(qtePressT);
+      const mx = barLeft + qtePressT * BAR_W;
+      ctx.save(); ctx.globalAlpha = alpha;
+
+      // Line through bar
+      ctx.fillStyle = pz.fg; ctx.fillRect(mx - 2, bTop - 4, 4, BAR_H + 8);
+
+      // ◆ diamond below bar
+      ctx.beginPath();
+      ctx.moveTo(mx,     bBot + 4);
+      ctx.lineTo(mx + 6, bBot + 10);
+      ctx.lineTo(mx,     bBot + 16);
+      ctx.lineTo(mx - 6, bBot + 10);
+      ctx.closePath();
+      ctx.fillStyle = pz.fg; ctx.shadowColor = pz.fg; ctx.shadowBlur = 8;
+      ctx.fill(); ctx.shadowBlur = 0;
+
+      // Rising zone label (rises DOWNWARD, away from player)
+      const rise = Math.min(1, age / 300) * 10;
+      ctx.font = `bold ${Math.max(9, BAR_W * 0.1)}px monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = pz.fg; ctx.shadowColor = pz.fg; ctx.shadowBlur = 5;
+      ctx.fillText(pz.label, mx, bBot + 28 + rise);
+      ctx.shadowBlur = 0;
+
+      ctx.restore();
+    }
+  }
+
+  ctx.textBaseline = 'alphabetic'; ctx.restore();
 }
 
 // ── Projectile tracking ───────────────────────────────────────────────────────
@@ -221,6 +627,7 @@ function initGame(socket, role, playerId, playerCount) {
   _devSocket = socket;
   displayPos.clear();
   effects=[]; floatingNums=[]; projSeen.clear();
+  dyingMonsters.clear(); playerHurtAt.clear(); screenShake=null;
   pendingDx=0; pendingDy=0; pendingAct=null;
   pendingDir={dx:0,dy:0}; pendingTargetId=null; hoverMonsterId=null;
   mapOverlayActive=false;
@@ -229,6 +636,10 @@ function initGame(socket, role, playerId, playerCount) {
   buildGameScreen(role);
   buildActionPad(socket, role);
   setupInput(socket);
+  if (role==='scholar'||isSolo) {
+    buildScholarUI();
+    document.getElementById('scholar-panel').style.display='flex';
+  }
 
   if (role==='scout'||isSolo) {
     const canvas=document.getElementById('game-canvas');
@@ -269,15 +680,20 @@ function stopGame() {
   if (animId) cancelAnimationFrame(animId);
   animId=null; latestState=null;
   pendingDir={dx:0,dy:0}; pendingTargetId=null;
+  const c=document.getElementById('game-canvas');
+  if(c) c.style.transform='';
+  screenShake=null;
 }
 
 // ── Level banner ──────────────────────────────────────────────────────────────
 
-function showLevelBanner(completedLevel, nextLvl, maxLevel) {
+function showLevelBanner(completedLevel, nextLvl, maxLevel, levelType) {
   let banner=document.getElementById('level-banner');
   if(!banner){banner=document.createElement('div');banner.id='level-banner';document.body.appendChild(banner);}
   if(completedLevel>=maxLevel){
     banner.innerHTML=`<div class="lv-title">🏆 全關卡完成！</div><div class="lv-sub">等待最終結果…</div>`;
+  } else if(levelType==='rest'){
+    banner.innerHTML=`<div class="lv-title">🛌 休息站</div><div class="lv-sub">全隊血量回滿！稍作休息後繼續…</div>`;
   } else {
     banner.innerHTML=`<div class="lv-title">第 ${completedLevel} 關 完成</div><div class="lv-sub">► 第 ${nextLvl} 關 即將開始</div>`;
   }
@@ -294,9 +710,8 @@ function buildGameScreen(role) {
       <div id="g-role-badge" class="role-${role}">${ROLE_LABEL[role]||role}</div>
       <div id="g-level-badge">Lv.1</div>
       <div id="g-beat-row">
-        <span class="beat-label">拍</span>
-        <span class="beat-dot" id="bd-1"></span>
-        <span class="beat-dot" id="bd-2"></span>
+        <span id="g-mode-badge" class="beat-label">自由</span>
+        ${Array.from({length:BEATS_PER_TURN},(_,i)=>`<span class="beat-dot" id="bd-${i+1}"></span>`).join('')}
       </div>
       <div id="g-players"></div>
       <div id="g-timer">--:--</div>
@@ -329,7 +744,7 @@ function buildActionPad(socket, role) {
   const el = document.getElementById('g-action-pad');
   if (!el) return;
 
-  const dmgNote = role==='fighter'||isSolo ? '35傷' : '20傷';
+  const dmgNote = role==='fighter'||isSolo ? '18傷' : role==='scout'?'10傷':role==='architect'?'12傷':'8傷';
   const actionButtons = `
     <div class="pad-label">動作 (J K L / 1 2 3)${role!=='fighter'&&!isSolo?' <span style="color:#555;font-size:8px">'+dmgNote+'</span>':''}</div>
     <div class="action-row">
@@ -373,6 +788,7 @@ function buildActionPad(socket, role) {
   };
   window._setAct = (act) => {
     pendingAct=act;
+    _recordQtePress();
     _submitAndRefresh(socket);
   };
   window._markMonster = (id) => socket.emit('mark_monster', { monsterId:id });
@@ -392,14 +808,19 @@ function buildActionPad(socket, role) {
       if(!latestState) return;
       const {tx,ty}=canvasToTile(canvas,e,latestState);
       if(tx===null) return;
-      // Architect: wall placement on empty floor
-      if((gameRole==='architect'||isSolo)&&!latestState?.monsters?.find(mo=>mo.hp>0&&mo.x===tx&&mo.y===ty)){
+      const m=latestState?.monsters?.find(mo=>mo.hp>0&&mo.x===tx&&mo.y===ty);
+      // Scholar: click monster → mark it (scholar's unique action)
+      if(gameRole==='scholar'&&!isSolo&&m){
+        socket.emit('mark_monster',{monsterId:m.id}); return;
+      }
+      // Architect: click empty floor → place wall
+      if((gameRole==='architect'||isSolo)&&!m){
         socket.emit('place_wall',{x:tx,y:ty}); return;
       }
-      // Attack: click on monster
-      const m=latestState?.monsters?.find(mo=>mo.hp>0&&mo.x===tx&&mo.y===ty);
+      // All other roles: click monster → set as attack target
       if(!m) return;
       pendingTargetId=m.id;
+      _recordQtePress();
       _submitAndRefresh(socket);
     });
   }
@@ -425,8 +846,12 @@ function updatePadUI() {
     pendingDx>0?'→':pendingDx<0?'←':pendingDy>0?'↓':'↑';
   const preview = document.getElementById('pad-preview');
   if (preview) {
-    const actColor = pendingAct ? ACTION_INFO[pendingAct].color : '#555';
-    preview.innerHTML=`移動：<b>${dirLabel}</b> ／ 動作：<b style="color:${actColor}">${actLabel}</b>`;
+    if (!latestState?.inCombat) {
+      preview.innerHTML = '🚶 自由移動中';
+    } else {
+      const actColor = pendingAct ? ACTION_INFO[pendingAct].color : '#555';
+      preview.innerHTML=`移動：<b>${dirLabel}</b> ／ 動作：<b style="color:${actColor}">${actLabel}</b>`;
+    }
   }
 
   // Highlight action button
@@ -445,20 +870,28 @@ function _updateDirBadge() {
 }
 
 function updateBeatUI(beat, socket) {
+  const combat = latestState?.inCombat ?? false;
   for (let i=1;i<=BEATS_PER_TURN;i++) {
     const dot=document.getElementById('bd-'+i);
     if(!dot) continue;
     dot.classList.remove('beat-done','beat-current','beat-resolve');
+    if (!combat) { dot.classList.add('beat-done'); continue; }  // dim all dots in free mode
     if(i<beat)        dot.classList.add('beat-done');
-    else if(i===beat) dot.classList.add(beat===BEATS_PER_TURN?'beat-resolve':'beat-current');
+    else if(i===beat) dot.classList.add('beat-current');
   }
-  if (beat===1) {
+  if (combat) {
+    // Combat mode: clear one-shot actions every beat
     pendingAct=null;
-    // Auto-submit single-slot direction, then clear for next turn
-    if (socket) socket.emit('player_submit', {dx:pendingDir.dx, dy:pendingDir.dy, combatAction:null, targetId:pendingTargetId});
-    pendingDir={dx:0,dy:0}; pendingTargetId=null;
+    pendingTargetId=null;
+    pendingDir={dx:0,dy:0};
     updatePadUI(); _updateDirBadge();
   }
+}
+
+function _recordQtePress() {
+  if (!latestState?.inCombat) return;
+  qtePressT   = Math.min(0.999, Math.max(0, (performance.now() - beatFlash) / BEAT_MS));
+  qteResultAt = performance.now();
 }
 
 // ── Scholar UI ───────────────────────────────────────────────────────────────
@@ -634,7 +1067,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
     const moving = m.stance==='移' || (rawDp&&(rawDp.tx!==rawDp.sx||rawDp.ty!==rawDp.sy));
     if (moving) { scaleX=1+coil*0.7; scaleY=1-coil; }
     else        { scaleX=1+coil*0.5; scaleY=1+coil*0.5; } // attacker swells
-  } else if (lastBeat===2 && beatAge<MONSTER_ANIM_MS && rawDp &&
+  } else if (lastBeat===BEATS_PER_TURN && beatAge<MONSTER_ANIM_MS && rawDp &&
              (rawDp.tx!==rawDp.sx||rawDp.ty!==rawDp.sy)) {
     // Resolve beat: elongate along movement direction during slide
     const t = beatAge/MONSTER_ANIM_MS;
@@ -652,7 +1085,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   // Draw body (scaled for idle, fixed for attacking stance)
   ctx.save();
   ctx.translate(cx, cy);
-  if (isIdle) ctx.scale(scaleX, scaleY);
+  ctx.scale(scaleX, scaleY);
 
   if (si && m.stance!=='移') {
     const pulse=0.5+0.5*Math.sin(now/140);
@@ -676,13 +1109,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   ctx.fillText(m.label,0,0); ctx.textBaseline='alphabetic';
   ctx.restore();
 
-  // Stance label + HP bar (not scaled)
-  if (si && m.stance!=='移') {
-    ctx.fillStyle=si.color;
-    ctx.font=`bold ${Math.max(6,ts*0.3)}px monospace`;
-    ctx.textAlign='center';
-    ctx.fillText(si.label, cx, cy-r-3);
-  }
+  // (stance label now drawn large in the section below)
 
   const barW=ts*0.85, barH=m.monsterType==='boss'?5:3;
   const bx=cx-barW/2, by=cy-r-10;
@@ -690,11 +1117,47 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   const pct=m.maxHp?m.hp/m.maxHp:0;
   ctx.fillStyle=pct>0.5?'#44cc44':pct>0.25?'#cccc44':'#cc4444';
   ctx.fillRect(bx,by,barW*pct,barH);
+
+  // ── Stance label (large) ─────────────────────────────────────────────────────
+  if (si && m.stance !== '移' && m.stance !== '休') {
+    const pulse = 0.6 + 0.4 * Math.sin(now / 160);
+    ctx.save();
+    ctx.fillStyle = si.color;
+    ctx.font = `bold ${Math.max(10, ts * 0.52)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.shadowColor = si.color; ctx.shadowBlur = 6 + pulse * 4;
+    ctx.fillText(si.label, cx, by - barH - 3);
+    ctx.restore();
+  }
+
+  // ── Rage indicator ───────────────────────────────────────────────────────────
+  if (m.enraged) {
+    const pulse = 0.5 + 0.5 * Math.sin(now / 100);
+    ctx.save(); ctx.globalAlpha = 0.55 + pulse * 0.3;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 6 + pulse * 3, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ff4400'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Result preview: show win/clash/lose prediction when player has action + monster has stance ──
+  if (m.stance && m.id===pendingTargetId) {
+    const result=STANCE_RESULT[pendingAct]?.[m.stance];
+    if (result && result!=='none') {
+      ctx.save();
+      ctx.fillStyle=RESULT_COLOR[result];
+      ctx.font=`bold ${Math.max(9,ts*0.32)}px monospace`;
+      ctx.textAlign='left'; ctx.shadowColor=RESULT_COLOR[result]; ctx.shadowBlur=5;
+      ctx.fillText(RESULT_LABEL[result], cx+r+4, cy+4);
+      ctx.restore();
+    }
+  }
 }
 
 function drawPlayer(ctx, p, ts, isMe, ox, oy, now) {
-  const dp=getDisplayPos('p_'+p.id,p.x,p.y,now,PLAYER_ANIM_MS);
-  const cx=(dp.x-(ox||0))*ts+ts/2, cy=(dp.y-(oy||0))*ts+ts/2, r=ts*0.35;
+  const dp = getDisplayPos('p_'+p.id, p.x, p.y, now, PLAYER_ANIM_MS);
+  let cx = (dp.x-(ox||0))*ts+ts/2;
+  let cy = (dp.y-(oy||0))*ts+ts/2;
+  const r = ts * 0.35;
 
   // Dead player ghost
   if (p.hp <= 0) {
@@ -702,6 +1165,40 @@ function drawPlayer(ctx, p, ts, isMe, ox, oy, now) {
     ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
     ctx.fillStyle='#444'; ctx.fill();
     ctx.restore(); return;
+  }
+
+  // Hurt shake
+  const hurtTs  = playerHurtAt.get(p.id);
+  const hurtAge = hurtTs !== undefined ? now - hurtTs : 99999;
+  if (hurtAge < 430) {
+    const ht = hurtAge / 430;
+    const shakeAmt = ts * 0.12 * Math.exp(-ht * 5) * Math.sin(ht * Math.PI * 9);
+    cx += shakeAmt;
+    cy += shakeAmt * 0.5;
+  }
+
+  // Beat bounce (combat)
+  const beatAge2 = now - beatFlash;
+  if (latestState?.inCombat && beatAge2 < 210) {
+    cy -= Math.sin(beatAge2 / 210 * Math.PI) * ts * 0.09;
+  }
+
+  // Idle breathe (non-combat)
+  if (!latestState?.inCombat) {
+    const phase = typeof p.id === 'string' ? p.id.charCodeAt(0) * 0.7 : 0;
+    const b = Math.sin(now / 720 + phase) * 0.028;
+    cx += b * ts * 0.3;
+    cy -= b * ts * 0.5;
+  }
+
+  // Combat pulse ring (isMe)
+  if (isMe && latestState?.inCombat) {
+    const pulse = 0.5 + 0.5 * Math.sin(now / 115);
+    ctx.save();
+    ctx.globalAlpha = 0.22 + pulse * 0.18;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 5 + pulse * 2, 0, Math.PI*2);
+    ctx.strokeStyle = '#ff4444'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
   }
 
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
@@ -712,7 +1209,7 @@ function drawPlayer(ctx, p, ts, isMe, ox, oy, now) {
   ctx.textAlign='center';
   ctx.fillText(p.name.substring(0,4),cx,cy-r-3);
 
-  // Show pending combat action above self (fighter/solo)
+  // Pending combat action above self (fighter/solo)
   if (isMe && pendingAct && ACTION_INFO[pendingAct]) {
     const ai=ACTION_INFO[pendingAct];
     ctx.save();
@@ -721,6 +1218,16 @@ function drawPlayer(ctx, p, ts, isMe, ox, oy, now) {
     ctx.textAlign='center';
     ctx.shadowColor=ai.color; ctx.shadowBlur=4;
     ctx.fillText(ai.label, cx, cy-r-14);
+    ctx.restore();
+  }
+
+  // Hurt tint overlay (red flash)
+  if (hurtAge < 360) {
+    const ha = Math.max(0, 1 - hurtAge / 360) * 0.52;
+    ctx.save();
+    ctx.globalAlpha = ha;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, Math.PI*2);
+    ctx.fillStyle = '#ff1800'; ctx.fill();
     ctx.restore();
   }
 }
@@ -736,6 +1243,7 @@ function renderScout(canvas, state, now) {
   if(state.pings) for(const p of state.pings){if(!p.bornAt)p.bornAt=performance.now();drawPing(ctx,p,ts,0,0,now);}
   drawWindmillArms(ctx,state.windmillArms,ts,0,0,now);
   if(state.monsters) for(const m of state.monsters) if(m.hp>0) drawMonster(ctx,m,ts,0,0,now);
+  drawDyingMonsters(ctx,ts,now,0,0);
   if(state.players) for(const p of Object.values(state.players)) drawPlayer(ctx,p,ts,p.id===gameId,0,0,now);
   drawProjectiles(ctx,state.projectiles,ts,0,0,now);
   drawEffects(ctx,ts,now,0,0); drawFloatingNums(ctx,ts,now,0,0);
@@ -767,6 +1275,7 @@ function renderFighter(canvas, state, now) {
       ctx.restore();
     }
   }
+  drawDyingMonsters(ctx,ts,now,smoothOx,smoothOy);
   if(state.players) for(const p of Object.values(state.players)){
     const lx=p.x-iox, ly=p.y-ioy;
     if(lx<-1||ly<-1||lx>span||ly>span) continue;
@@ -795,13 +1304,14 @@ function renderArchitect(canvas, state, now) {
   if(state.pressurePlates) drawPressurePlates(ctx,state.pressurePlates,ts,0,0);
   drawWindmillArms(ctx,state.windmillArms,ts,0,0,now);
   if(state.monsters) for(const m of state.monsters) if(m.hp>0) drawMonster(ctx,m,ts,0,0,now);
+  drawDyingMonsters(ctx,ts,now,0,0);
   if(state.players) for(const p of Object.values(state.players)) drawPlayer(ctx,p,ts,p.id===gameId,0,0,now);
   drawProjectiles(ctx,state.projectiles,ts,0,0,now);
   drawEffects(ctx,ts,now,0,0); drawFloatingNums(ctx,ts,now,0,0);
 }
 
 function _rangeForRole(role) {
-  return {fighter:1,scout:5,scholar:1,architect:3}[role]||1;
+  return 1;  // all melee
 }
 
 function renderSharedView(canvas, state, now) {
@@ -868,6 +1378,8 @@ function renderSharedView(canvas, state, now) {
       ctx.restore();
     }
   }
+
+  drawDyingMonsters(ctx,ts,now,smoothOx,smoothOy);
 
   // Architect: highlight own walls within viewport
   if(gameRole==='architect'&&state.myWalls){
@@ -984,6 +1496,7 @@ function renderSolo(canvas, state, now) {
   if(state.pressurePlates) drawPressurePlates(ctx,state.pressurePlates,ts,0,0);
   drawWindmillArms(ctx,state.windmillArms,ts,0,0,now);
   if(state.monsters) for(const m of state.monsters) if(m.hp>0) drawMonster(ctx,m,ts,0,0,now);
+  drawDyingMonsters(ctx,ts,now,0,0);
   if(state.players) for(const p of Object.values(state.players)) drawPlayer(ctx,p,ts,p.id===gameId,0,0,now);
   drawProjectiles(ctx,state.projectiles,ts,0,0,now);
   drawEffects(ctx,ts,now,0,0); drawFloatingNums(ctx,ts,now,0,0);
@@ -1000,6 +1513,12 @@ function renderHUD(state) {
     const s=Math.ceil(state.timeLeft/1000);
     tEl.textContent=`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
     tEl.style.color=s<=30?'#D85A30':'#aaa';
+  }
+
+  const modeEl=document.getElementById('g-mode-badge');
+  if(modeEl){
+    if(state.inCombat){ modeEl.textContent='⚔戰鬥'; modeEl.style.color='#D85A30'; }
+    else              { modeEl.textContent='🚶自由'; modeEl.style.color='#555577'; }
   }
 
   const lvEl=document.getElementById('g-level-badge');
@@ -1047,6 +1566,7 @@ function renderLoop(now) {
   const state=latestState;
   try {
     const canvas=document.getElementById('game-canvas');
+    if(canvas) _tickShake(canvas, now);
     if(isSolo&&canvas){
       renderSolo(canvas,state,now); renderScholar(state);
       document.getElementById('g-alerts').style.display='block';
@@ -1057,6 +1577,7 @@ function renderLoop(now) {
       renderSharedView(canvas,state,now);
       if(gameRole==='scholar') renderScholar(state);
     }
+    if(canvas && state.phase==='playing') drawQTE(canvas, state, now);
     renderHUD(state);
   } catch(e){ console.error('render error',e); }
   animId=requestAnimationFrame(renderLoop);
@@ -1094,10 +1615,10 @@ function setupInput(socket) {
       e.preventDefault();
       const idx=STANCES.indexOf(pendingAct);
       pendingAct=e.key==='ArrowRight'?STANCES[(idx+1)%STANCES.length]:STANCES[(idx-1+STANCES.length)%STANCES.length];
-      _submitAndRefresh(socket); return;
+      _recordQtePress(); _submitAndRefresh(socket); return;
     }
-    if(e.key in actMap){ e.preventDefault(); pendingAct=actMap[e.key]; _submitAndRefresh(socket); return; }
-    if(e.key===' '||e.code==='Space'){ e.preventDefault(); _submitAndRefresh(socket); }
+    if(e.key in actMap){ e.preventDefault(); pendingAct=actMap[e.key]; _recordQtePress(); _submitAndRefresh(socket); return; }
+    if(e.key===' '||e.code==='Space'){ e.preventDefault(); _recordQtePress(); _submitAndRefresh(socket); }
   });
 }
 
@@ -1119,16 +1640,17 @@ function buildQuickMessages(socket, role) {
 // ── Role help ─────────────────────────────────────────────────────────────────
 
 const ROLE_HELP = {
-  scout:     'WASD/↑↓移動 · ←→切換招式(35傷)\n點怪物射擊(d≤5) · M看全圖\n右鍵標記位置',
-  fighter:   'WASD/↑↓移動 · ←→切換招式(35傷)\nJ/K/L 快捷 · Esc停下',
-  scholar:   'WASD/↑↓移動 · 只能用架(15傷)\n架成功→易傷2拍 · 點標記廣播招式',
-  architect: 'WASD/↑↓移動 · ←→切換招式(20傷)\n點怪物投擲(d≤3) · 點地圖放牆',
+  scout:     'WASD 自由走 · 遇怪進戰鬥模式\nJ/K/L 選招式 · 克制+治療15%\nM 看全圖 · 右鍵標記位置',
+  fighter:   'WASD 自由走 · 遇怪進戰鬥模式\nJ/K/L 選招式 · 克制+治療15%\n怪物頭下方的 QTE 條看時機！',
+  scholar:   'WASD 自由走 · 遇怪自動架格擋\n格擋成功→怪物易傷+治療\n點怪物標記・看怪物招式序列',
+  architect: 'WASD 自由走 · 遇怪進戰鬥模式\nJ/K/L 選招式 · 克制+治療15%\n點地圖放牆（最多3面）',
 };
 
 function buildRoleHelp(role) {
   const el=document.getElementById('g-help'); if(!el) return;
   const help=isSolo?'WASD 移動 · 1/2/3 選動作 · 0=純移動\n架→克赤 刺→克黃 斬→克蒼\n右鍵標記 · 點地圖放牆':(ROLE_HELP[role]||'');
-  el.innerHTML=`<div class="panel-label">操作說明</div><pre class="help-text">${help}</pre>`;
+  const soloHelp = 'WASD 自由走 · 靠近怪物進戰鬥模式\n1/2/3 或 J/K/L 選招式\n架→克赤 刺→克黃 斬→克蒼\nQTE 條在玩家下方 · 看三角游標時機';
+  el.innerHTML=`<div class="panel-label">操作說明</div><pre class="help-text">${isSolo?soloHelp:(ROLE_HELP[role]||help)}</pre>`;
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -1139,8 +1661,17 @@ window.GAME = {
   showLevelBanner,
   onBeat,
   setLatestState: (s) => {
-    updateEffects(latestState, s, performance.now());
+    const now = performance.now();
+    updateEffects(latestState, s, now);
     syncProjectiles(s);
+    // Clear QTE + pending actions when leaving combat
+    if (prevInCombat && !s.inCombat) {
+      qtePressT = null; qteResultAt = null;
+      pendingAct = null; pendingTargetId = null;
+      winStreak = 0;
+      updatePadUI();
+    }
+    prevInCombat = s.inCombat || false;
     latestState = s;
   },
 };
