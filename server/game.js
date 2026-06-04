@@ -811,6 +811,7 @@ function startTurn(gs) {
   gs.resolvedThisTurn=false;
   gs.combatResults=[];
   gs.combatResultTs=Date.now();
+  gs.foolEffectId=null;          // clear each beat so overlay doesn't linger
 
   if(gs.isRestRoom){ _tickRest(gs); return; }
   if(gs.pressurePlates) _tickPuzzle(gs);
@@ -1060,7 +1061,7 @@ function _resolveMelee(player, monster, playerAction, gs, now) {
   gs.combatResults.push({ result, mx: monster.x, my: monster.y, px: player.x, py: player.y });
 
   const isFighter = _hasRole(player,'fighter');
-  const isFool    = _hasRole(player,'fool');
+  const isFool    = player.role === 'fool'; // 神罰 only for primary fool, not bonusRole
   const taunting  = isFighter && player.taunting;
 
   if (result === 'win') {

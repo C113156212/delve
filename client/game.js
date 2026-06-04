@@ -1395,6 +1395,26 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
     ctx.restore();
   }
 
+  // ── Taunt redirect arrow: monster is being drawn to fighter ──────────────────
+  {
+    const _taunter = Object.values(latestState?.players||{}).find(p=>p.taunting);
+    if (_taunter && m.nextTarget === _taunter.id) {
+      const pulse3 = 0.6 + 0.4 * Math.abs(Math.sin(now / 130));
+      ctx.save();
+      ctx.globalAlpha = pulse3 * 0.9;
+      ctx.fillStyle = '#D85A30';
+      // Small downward arrow above the monster label
+      const arrY = by - r - 8;
+      ctx.beginPath();
+      ctx.moveTo(cx, arrY + 6);
+      ctx.lineTo(cx - 5, arrY - 2);
+      ctx.lineTo(cx + 5, arrY - 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   // ── Result preview: show win/clash/lose prediction when player has action + monster has stance ──
   if (m.stance && m.id===pendingTargetId) {
     const result=STANCE_RESULT[pendingAct]?.[m.stance];
@@ -1458,7 +1478,8 @@ function drawPlayer(ctx, p, ts, isMe, ox, oy, now) {
   }
 
   // Taunt ring: fighter actively taunting — ring shows 4-tile range
-  if (p.role === 'fighter' && latestState?.players?.[p.id]?.taunting) {
+  const _pTaunting = latestState?.players?.[p.id]?.taunting;
+  if (p.role === 'fighter' && _pTaunting) {
     const pulse = 0.5 + 0.5 * Math.sin(now / 110);
     ctx.save();
     ctx.globalAlpha = 0.28 + pulse * 0.18;
@@ -1466,6 +1487,33 @@ function drawPlayer(ctx, p, ts, isMe, ox, oy, now) {
     ctx.strokeStyle = '#D85A30'; ctx.lineWidth = 2;
     ctx.setLineDash([8, 5]); ctx.stroke(); ctx.setLineDash([]);
     ctx.restore();
+  }
+
+  // Fighter isolation indicator (孤立 state)
+  if (p.role === 'fighter' && !_pTaunting) {
+    const _alivePlayers = Object.values(latestState?.players || {}).filter(q=>q.hp>0&&q.id!==p.id);
+    if (_alivePlayers.length > 0) { // multiplayer only
+      const VIEW = 4;
+      const _inView = _alivePlayers.filter(q=>Math.abs(q.x-p.x)+Math.abs(q.y-p.y)<=VIEW);
+      const _n = _inView.length / _alivePlayers.length;
+      if (_n < 0.3) {
+        // Isolated / danger — red pulsing ring
+        const pulse2 = 0.4 + 0.6 * Math.abs(Math.sin(now / 90));
+        ctx.save();
+        ctx.globalAlpha = pulse2 * 0.5;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 7 + pulse2 * 3, 0, Math.PI*2);
+        ctx.strokeStyle = '#ff2222'; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.restore();
+      } else if (_n > 0.7) {
+        // Protected — soft gold glow
+        const pulse2 = 0.5 + 0.5 * Math.sin(now / 700);
+        ctx.save();
+        ctx.globalAlpha = 0.12 + pulse2 * 0.08;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI*2);
+        ctx.fillStyle = '#ffdd55'; ctx.fill();
+        ctx.restore();
+      }
+    }
   }
 
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
@@ -1823,24 +1871,49 @@ function renderHUD(state) {
 let _lastFoolEffectId = null;
 let _foolEffectAt = 0;
 
+const FOOL_EFFECT_LABELS = {
+  balloons:'🎈 氣球爆炸！', question:'❓ 問號！', stumble:'💫 踉蹌！',
+  team_heal:'💚 全隊回血！', scatter:'💥 怪物彈飛！', mass_stun:'⚡ 暈眩！',
+  vulnerable_all:'🎯 易傷！', speed_boost:'⚡ 加速！',
+  rage_nearest:'😡 最近怪狂暴', team_bleed:'🩸 全隊扣血', hide_qte:'👁 QTE消失！',
+};
+
 function _drawFoolEffectOverlay(canvas, state, now) {
   const id = state.foolEffectId;
   if (!id) return;
   if (id !== _lastFoolEffectId) { _lastFoolEffectId = id; _foolEffectAt = now; }
   const age = now - _foolEffectAt;
-  const dur = 1800;
+  const dur = 2000;
   if (age > dur) return;
   const t = age / dur;
-  const alpha = Math.max(0, (1 - t) * (1 - t) * 0.55);
+  const fadeAlpha = Math.max(0, (1 - t * 1.2));
   const ctx = canvas.getContext('2d');
   ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = '#cc44cc';
-  ctx.font = `bold ${Math.max(18, canvas.height * 0.08)}px monospace`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.shadowColor = '#cc44cc'; ctx.shadowBlur = 12;
-  ctx.fillText(`🎲 ${id}`, canvas.width / 2, canvas.height * 0.18);
+
+  // Screen flash for vfx effects
+  if (id === 'balloons' || id === 'question' || id === 'stumble') {
+    ctx.globalAlpha = Math.max(0, (1 - t * 3) * 0.3);
+    ctx.fillStyle = '#cc44cc';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  } else if (['team_heal','scatter','mass_stun','vulnerable_all','speed_boost'].includes(id)) {
+    ctx.globalAlpha = Math.max(0, (1 - t * 3) * 0.22);
+    ctx.fillStyle = '#44ff88';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  } else if (['rage_nearest','team_bleed','hide_qte'].includes(id)) {
+    ctx.globalAlpha = Math.max(0, (1 - t * 3) * 0.25);
+    ctx.fillStyle = '#ff2244';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Label text
+  ctx.globalAlpha = fadeAlpha * 0.9;
+  const label = FOOL_EFFECT_LABELS[id] || `🎲 ${id}`;
+  const fs = Math.max(16, canvas.height * 0.075);
+  ctx.font = `bold ${fs}px monospace`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = '#cc44cc'; ctx.shadowBlur = 14;
+  ctx.fillStyle = '#fff';
+  ctx.fillText(label, canvas.width / 2, canvas.height * 0.2);
   ctx.restore();
 }
 
@@ -1893,8 +1966,9 @@ function renderLoop(now) {
     } else if(canvas&&state.localGrid) {
       renderSharedView(canvas,state,now);
       if(gameRole==='scholar') renderScholar(state);
-      if(gameRole==='fool') _drawFoolEffectOverlay(canvas, state, now);
     }
+    // Fool effect overlay shows for everyone (effects affect all players)
+    if(canvas && state.foolEffectId) _drawFoolEffectOverlay(canvas, state, now);
     if(canvas && state.phase==='playing') drawQTE(canvas, state, now);
     if(canvas && bossIntro) drawBossIntro(canvas.getContext('2d'), canvas, now);
     renderHUD(state);
