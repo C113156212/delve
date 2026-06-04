@@ -199,6 +199,16 @@ io.on('connection', (socket) => {
     if (room.hostId !== socket.id) { socket.emit('error_msg', { msg: '只有房主可以開始' }); return; }
     if (!canStart(code))           { socket.emit('error_msg', { msg: '還有人沒選職業' });   return; }
 
+    // Auto-assign uncovered roles to the host as bonusRoles.
+    // Host will receive the combined view and can act for those roles.
+    const ALL_ROLES = ['fighter', 'scout', 'scholar', 'architect'];
+    const covered = room.players.map(p => p.role);
+    const uncovered = ALL_ROLES.filter(r => !covered.includes(r));
+    if (uncovered.length > 0) {
+      const host = room.players.find(p => p.id === room.hostId);
+      if (host) host.bonusRoles = uncovered;
+    }
+
     setPhase(code, 'playing');
     const gs = createGameState(room.players);
     gs.lastChangeAt = Date.now(); gs.lastBroadcastAt = 0;

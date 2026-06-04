@@ -686,7 +686,7 @@ function createGameState(players, level=1) {
   const gamePlayers={};
   players.forEach((p,i)=>{
     const sp=spawnPts[i%spawnPts.length];
-    gamePlayers[p.id]={id:p.id,name:p.name,role:p.role,
+    gamePlayers[p.id]={id:p.id,name:p.name,role:p.role,bonusRoles:p.bonusRoles||[],
       x:sp.x,y:sp.y,hp:CONFIG.PLAYER_HP[p.role]||100,maxHp:CONFIG.PLAYER_HP[p.role]||100,
       lastMove:0,lastSpecial:0,walls:[],atExit:false,comboStreak:0};
   });
@@ -1436,7 +1436,7 @@ function filterStateForRole(gs, role, playerId) {
   gs.messages=gs.messages.filter(m=>m.until>now);
 
   const playerSnap=Object.fromEntries(Object.entries(gs.players).map(([id,p])=>[id,
-    {id:p.id,name:p.name,role:p.role,x:p.x,y:p.y,hp:p.hp,maxHp:p.maxHp,atExit:p.atExit}]));
+    {id:p.id,name:p.name,role:p.role,bonusRoles:p.bonusRoles||[],x:p.x,y:p.y,hp:p.hp,maxHp:p.maxHp,atExit:p.atExit}]));
 
   const liveProj=gs.projectiles.filter(p=>now-p.createdAt<p.dur);
   const myPlayer=gs.players[playerId];
@@ -1456,6 +1456,7 @@ function filterStateForRole(gs, role, playerId) {
   };
 
   const specialCd=myPlayer?Math.max(0,_specialCd(role)-(now-(myPlayer.lastSpecial||0))):0;
+  const bonusRoles = myPlayer?.bonusRoles || [];
 
   // Solo / 1-player: full view with all info
   if(role==='solo'||Object.keys(gs.players).length===1){
@@ -1463,6 +1464,16 @@ function filterStateForRole(gs, role, playerId) {
     return {...base, grid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
       monsters:gs.monsters.map(m=>_monsterSnap(m,true,3)),
       traps:gs.traps, alerts, specialCd, isSolo:true};
+  }
+
+  // Player with bonus roles gets full grid + scholar alerts for covered roles
+  if(bonusRoles.length > 0){
+    const hasScholar = bonusRoles.includes('scholar') || role==='scholar';
+    const alerts = hasScholar ? _buildAlerts(gs) : [];
+    return {...base, grid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
+      monsters:gs.monsters.map(m=>_monsterSnap(m,true,3)),
+      traps:gs.traps, alerts, specialCd, isSolo:false, bonusRoles,
+      allMonsters: hasScholar ? gs.monsters.map(m=>_monsterSnap(m,true,3)) : undefined};
   }
 
   // Fighter: 9×9 viewport, sees stances

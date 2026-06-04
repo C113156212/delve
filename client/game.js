@@ -923,6 +923,7 @@ function buildGameScreen(role) {
       </div>
       <div id="g-players"></div>
       <div id="g-specials-hud"></div>
+      <div id="g-party-roles"></div>
       <div id="g-timer">--:--</div>
     </div>
     <div id="g-body">
@@ -1816,7 +1817,7 @@ const LEVEL_TYPE_COLOR = { boss:'#ff2244', rest:'#44cc88', puzzle:'#7F77DD', nor
 const LEVEL_TYPE_LABEL = { boss:'⚡BOSS', rest:'🛌休息', puzzle:'🧩謎題', normal:'' };
 
 // HUD diff cache — only update DOM when content actually changes
-const _hud = { timerS:-1, inCombat:null, level:-1, levelType:null, playersHtml:'', msgsHtml:'', specialsHtml:'' };
+const _hud = { timerS:-1, inCombat:null, level:-1, levelType:null, playersHtml:'', msgsHtml:'', specialsHtml:'', partyRolesHtml:'' };
 // Cached DOM element refs — looked up once after game screen builds
 const _hudEl = {};
 function _hel(id){ return _hudEl[id] || (_hudEl[id]=document.getElementById(id)); }
@@ -1864,6 +1865,27 @@ function renderHUD(state) {
   if(state.bossPhase4)  sh+=`<span class="hud-pill warn" style="color:#ff00ff">⚡絕對形態</span>`;
   if(state.isRestRoom)  sh+=`<span class="hud-pill ready">🛌回血</span>`;
   if(sh!==_hud.specialsHtml){_hud.specialsHtml=sh;const el=_hel('g-specials-hud');if(el)el.innerHTML=sh;}
+
+  // ── Party role chips (top-right, shows who has which role) ───────────────────
+  if(state.players){
+    const ROLE_COLOR_MAP={'scout':'#1D9E75','fighter':'#D85A30','scholar':'#BA7517','architect':'#7F77DD'};
+    const ROLE_SHORT={'scout':'斥','fighter':'戰','scholar':'學','architect':'築'};
+    const players=Object.values(state.players);
+    // Only show when there are multiple players (solo already has g-role-badge)
+    const prh = players.length>1
+      ? players.map(p=>{
+          const isMe=p.id===gameId;
+          const roles=[p.role,...(p.bonusRoles||[])].filter(Boolean);
+          return roles.map((r,i)=>{
+            const col=ROLE_COLOR_MAP[r]||'#555';
+            const short=ROLE_SHORT[r]||'?';
+            const label = i===0 ? `${short} ${p.name}` : short; // show name only on first role
+            return `<span class="party-role-chip${isMe&&i===0?' me':''}" style="color:${col};border-color:${col}">${label}</span>`;
+          }).join('');
+        }).join('')
+      : '';
+    if(prh!==_hud.partyRolesHtml){_hud.partyRolesHtml=prh;const el=_hel('g-party-roles');if(el)el.innerHTML=prh;}
+  }
 }
 
 // ── Render loop ───────────────────────────────────────────────────────────────
@@ -1982,6 +2004,21 @@ window.GAME = {
       updatePadUI();
     }
     prevInCombat = s.inCombat || false;
+    // First state received: enable scholar panel if this player has scholar as bonus role
+    if (!latestState) {
+      const me = s.players?.[gameId];
+      const bonus = me?.bonusRoles || [];
+      if (bonus.length > 0) {
+        // Re-init scholar panel if scholar is a bonus role
+        if (bonus.includes('scholar') && !isSolo) {
+          buildScholarUI();
+          const sp = document.getElementById('scholar-panel');
+          if (sp) sp.style.display = 'flex';
+          document.getElementById('g-alerts').style.display = 'block';
+          document.getElementById('g-monsters').style.display = 'block';
+        }
+      }
+    }
     latestState = s;
   },
 };
