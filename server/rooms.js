@@ -32,7 +32,7 @@ function joinRoom(code, playerId, playerName) {
 }
 
 function pickRole(code, playerId, role) {
-  const VALID = ['scout', 'fighter', 'scholar', 'architect'];
+  const VALID = ['fool', 'fighter', 'scholar', 'architect'];
   const room = rooms.get(code);
   if (!room)                    return { error: '找不到房間' };
   if (!VALID.includes(role))    return { error: '無效職業' };
