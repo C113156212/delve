@@ -440,39 +440,38 @@ function drawEffects(ctx, ts, now, ox, oy) {
         ctx.globalAlpha = a * 0.75;
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
         ctx.fillStyle = e.color; ctx.fill();
+      } else if (e.type === 'balloon') {
+        // Rising coloured balloon
+        const rise = t * ts * 2.8;
+        const wobble = Math.sin(now / 200 + (e.phase||0)) * ts * 0.18;
+        const bx2 = cx + wobble;
+        const by2 = cy - rise - ts/2;
+        const br = ts * 0.14;
+        ctx.globalAlpha = Math.max(0, 1 - t * 1.1);
+        ctx.beginPath(); ctx.arc(bx2, by2, br, 0, Math.PI*2);
+        ctx.fillStyle = e.color; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1; ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(bx2, by2 + br);
+        ctx.lineTo(bx2 - wobble * 0.3, by2 + br + ts * 0.22);
+        ctx.strokeStyle = e.color; ctx.lineWidth = 1.5; ctx.stroke();
+      } else if (e.type === 'heal_burst') {
+        // Green rising plus sign
+        const hy = cy - t * ts * 1.5;
+        ctx.globalAlpha = Math.max(0, 1 - t * 1.3);
+        ctx.fillStyle = '#44ff88';
+        ctx.font = `bold ${Math.max(12, ts * 0.38)}px monospace`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.shadowColor = '#44ff88'; ctx.shadowBlur = 6;
+        ctx.fillText('+', cx, hy);
+        ctx.shadowBlur = 0;
       } else {
         const a = Math.max(0, (1 - t) * 0.9);
         const r = ts * (0.28 + t * 0.72);
         ctx.globalAlpha = a;
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
         ctx.strokeStyle = e.color; ctx.lineWidth = 3; ctx.stroke();
-      } else if (e.type === 'balloon') {
-      // Rising coloured balloon
-      const rise = t * ts * 2.8;
-      const wobble = Math.sin(now / 200 + (e.phase||0)) * ts * 0.18;
-      const bx = (e.px - (ox||0)) * ts + ts/2 + wobble;
-      const by = (e.py - (oy||0)) * ts - rise;
-      const br = ts * 0.14;
-      ctx.globalAlpha = Math.max(0, 1 - t * 1.1);
-      ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI*2);
-      ctx.fillStyle = e.color; ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(bx, by + br);
-      ctx.lineTo(bx - wobble * 0.3, by + br + ts * 0.22);
-      ctx.strokeStyle = e.color; ctx.lineWidth = 1.5; ctx.stroke();
-    } else if (e.type === 'heal_burst') {
-      // Green rising plus signs
-      const bx = (e.px - (ox||0)) * ts + ts/2;
-      const by = (e.py - (oy||0)) * ts + ts/2 - t * ts * 1.5;
-      ctx.globalAlpha = Math.max(0, 1 - t * 1.3);
-      ctx.fillStyle = '#44ff88';
-      ctx.font = `bold ${Math.max(12, ts * 0.38)}px monospace`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.shadowColor = '#44ff88'; ctx.shadowBlur = 6;
-      ctx.fillText('+', bx, by);
-      ctx.shadowBlur = 0;
-    }
+      }
     }
     ctx.restore();
   }
