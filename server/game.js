@@ -745,13 +745,13 @@ function nextLevel(gs){
   for(const p of Object.values(gs.players)){
     const sp=spawnPts[i++%spawnPts.length];
     if(p.hp>0){
-      p.x=sp.x; p.y=sp.y; p.atExit=false; p.comboStreak=0;
+      p.x=sp.x; p.y=sp.y; p.atExit=false; p.comboStreak=0; p.speedBoostUntil=0; p.taunting=false; p.tauntBeatsLeft=0;
       // Rest room = full heal; boss/puzzle = 80%; normal = 70%
       const healFrac=params.levelType==='rest'?1.0:params.levelType==='boss'?0.8:0.7;
       p.hp=Math.min(p.maxHp,Math.max(p.hp,Math.floor(p.maxHp*healFrac)));
     } else if (!_isSolo) {
       // Multiplayer revival: dead players come back at level start with reduced HP
-      p.x=sp.x; p.y=sp.y; p.atExit=false; p.comboStreak=0;
+      p.x=sp.x; p.y=sp.y; p.atExit=false; p.comboStreak=0; p.speedBoostUntil=0; p.taunting=false; p.tauntBeatsLeft=0;
       const reviveFrac=params.levelType==='rest'?1.0:0.30;
       p.hp=Math.floor(p.maxHp*reviveFrac);
       _msg(gs,`💫 ${p.name} 復活！${Math.round(reviveFrac*100)}% HP`,Date.now());
@@ -1092,14 +1092,15 @@ function _resolveMelee(player, monster, playerAction, gs, now) {
         return;
       }
 
+      const prevHp = monster.hp;
       monster.hp = Math.max(0, monster.hp - dmg);
       _checkSplit(gs, monster, now);
-      // Overkill chain
-      if (monster.hp === 0 && dmg > 0) {
-        const overkill = Math.max(0, dmg - (monster.hp + dmg));
+      // Overkill chain: excess damage carries to nearest alive monster
+      if (monster.hp === 0) {
+        const overkill = Math.max(0, dmg - prevHp);
         if (overkill > 0) {
           const chain = gs.monsters.find(o=>o.id!==monster.id&&o.hp>0&&dist(monster.x,monster.y,o.x,o.y)<=2);
-          if(chain){ chain.hp=Math.max(0,chain.hp-overkill); gs.combatResults.push({result:'win',mx:chain.x,my:chain.y,px:player.x,py:player.y}); }
+          if(chain){ chain.hp=Math.max(0,chain.hp-overkill); gs.combatResults.push({result:'win',mx:chain.x,my:chain.y,px:player.x,py:player.y}); if(chain.hp===0)_msg(gs,`${chain.label} 被擊倒！`,now); }
         }
       }
     }

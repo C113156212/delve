@@ -1299,10 +1299,8 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   // ── Target highlight: monster with active stance within attack range ──────────
   // Draws corner brackets around the tile to signal "this one is coming for you"
   {
-    const _myP = latestState?.players?.[gameId];
-    if (_myP && m.stance && m.stance !== '移' && m.stance !== '休' && m.stance !== '全彈') {
-      const _d = Math.abs(m.x - _myP.x) + Math.abs(m.y - _myP.y);
-      if (_d <= 2) {
+    if (m.stance && m.stance !== '移' && m.stance !== '休' && m.stance !== '全彈') {
+      if (_visNearestD <= 2) {
         const blink = 0.55 + 0.45 * Math.sin(now / 90);
         const tileX = (m.x - (ox||0)) * ts;
         const tileY = (m.y - (oy||0)) * ts;
@@ -1505,19 +1503,6 @@ function drawPlayer(ctx, p, ts, isMe, ox, oy, now) {
 
 // ── Role renders ──────────────────────────────────────────────────────────────
 
-function renderScout(canvas, state, now) {
-  const ts=fitCanvas(canvas,state.W,state.H);
-  const ctx=canvas.getContext('2d');
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  drawGrid(ctx,state.grid,state.W,state.H,ts);
-  if(state.traps) for(const t of state.traps) drawTrap(ctx,t,ts,false);
-  if(state.pings) for(const p of state.pings){if(!p.bornAt)p.bornAt=performance.now();drawPing(ctx,p,ts,0,0,now);}
-  if(state.monsters) for(const m of state.monsters) if(m.hp>0) drawMonster(ctx,m,ts,0,0,now);
-  drawDyingMonsters(ctx,ts,now,0,0);
-  if(state.players) for(const p of Object.values(state.players)) drawPlayer(ctx,p,ts,p.id===gameId,0,0,now);
-  drawProjectiles(ctx,state.projectiles,ts,0,0,now);
-  drawEffects(ctx,ts,now,0,0); drawFloatingNums(ctx,ts,now,0,0);
-}
 
 function renderFighter(canvas, state, now) {
   const VIEW=4, span=VIEW*2+1;
@@ -1561,23 +1546,6 @@ function renderFighter(canvas, state, now) {
   ctx.beginPath();ctx.moveTo(0,ccy);ctx.lineTo(canvas.width,ccy);ctx.stroke();
 }
 
-function renderArchitect(canvas, state, now) {
-  const ts=fitCanvas(canvas,state.W,state.H);
-  const ctx=canvas.getContext('2d');
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  drawGrid(ctx,state.grid,state.W,state.H,ts);
-  if(state.traps) for(const t of state.traps) drawTrap(ctx,t,ts,true);
-  if(state.pressurePlates) drawPressurePlates(ctx,state.pressurePlates,ts,0,0);
-  if(state.monsters) for(const m of state.monsters) if(m.hp>0) drawMonster(ctx,m,ts,0,0,now);
-  drawDyingMonsters(ctx,ts,now,0,0);
-  if(state.players) for(const p of Object.values(state.players)) drawPlayer(ctx,p,ts,p.id===gameId,0,0,now);
-  drawProjectiles(ctx,state.projectiles,ts,0,0,now);
-  drawEffects(ctx,ts,now,0,0); drawFloatingNums(ctx,ts,now,0,0);
-}
-
-function _rangeForRole(role) {
-  return 1;  // all melee
-}
 
 function renderSharedView(canvas, state, now) {
   const span=state.localGrid?.length||9;
@@ -1604,7 +1572,7 @@ function renderSharedView(canvas, state, now) {
   // Attack range overlay
   const me=state.players?.[gameId];
   if(me){
-    const range=_rangeForRole(gameRole);
+    const range=1;
     ctx.save(); ctx.globalAlpha=0.07;
     ctx.fillStyle=ROLE_COLOR[gameRole]||'#fff';
     for(let dy=-range;dy<=range;dy++) for(let dx=-range;dx<=range;dx++){
@@ -1731,18 +1699,6 @@ function drawMapOverlay(ctx, canvas, state, now) {
   ctx.restore();
 }
 
-function buildScoutMapUI() {
-  const overlay=document.getElementById('g-action-overlay');
-  if(!overlay) return;
-  const wrap=document.createElement('div');
-  wrap.innerHTML=`<button id="map-btn" class="hud-pill"
-    style="cursor:pointer"
-    onmousedown="mapOverlayActive=true" onmouseup="mapOverlayActive=false"
-    ontouchstart="mapOverlayActive=true" ontouchend="mapOverlayActive=false">
-    🗺 按住全圖 (M)
-  </button>`;
-  overlay.insertBefore(wrap, overlay.firstChild);
-}
 
 function renderSolo(canvas, state, now) {
   const isCorridor = state.H && state.H <= 8;
