@@ -1,7 +1,7 @@
 # DELVE — 開發速查手冊
 
 ## 版本
-v1.5.0 (2026-06-04)。`package.json` version 欄與 git log 同步更新。
+v1.5.1 (2026-06-04)。`package.json` version 欄與 git log 同步更新。
 
 ## 檔案結構
 ```

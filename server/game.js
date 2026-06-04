@@ -1204,6 +1204,7 @@ function _movePlayerImmediate(gs, p, dx, dy, now) {
   if(nx<0||ny<0||nx>=gs.W||ny>=gs.H) return;
   if(gs.grid[ny][nx]===TILE.WALL) return;
   if(gs.monsters.some(m=>m.hp>0&&m.x===nx&&m.y===ny)) return;
+  if(Object.values(gs.players).some(q=>q.id!==p.id&&q.hp>0&&q.x===nx&&q.y===ny)) return;
   const trap=gs.traps.find(t=>!t.triggered&&t.x===nx&&t.y===ny);
   if(trap){ _applyTrap(gs,p,trap); trap.triggered=true; gs.grid[ny][nx]=TILE.FLOOR; }
   p.x=nx; p.y=ny;
