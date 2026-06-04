@@ -8,7 +8,7 @@ const { createRoom, joinRoom, pickRole, canStart, getRoom, setPhase, removePlaye
 const {
   createGameState, nextLevel, MAX_LEVEL, BEAT_MS, BEATS_PER_TURN,
   startTurn, resolveTurn, spawnWave,
-  submitPlayerAction, movePlayerFree, placeWall, markMonster, scoutPing, quickMsg,
+  submitPlayerAction, movePlayerFree, placeDecoy, activateSkill, _redistributeRolesOnLeave, quickMsg,
   checkEndConditions, filterStateForRole,
 } = require('./game');
 
@@ -199,15 +199,15 @@ io.on('connection', (socket) => {
     if (room.hostId !== socket.id) { socket.emit('error_msg', { msg: '只有房主可以開始' }); return; }
     if (!canStart(code))           { socket.emit('error_msg', { msg: '還有人沒選職業' });   return; }
 
-    // Auto-assign uncovered roles to the host as bonusRoles.
-    // Host will receive the combined view and can act for those roles.
-    const ALL_ROLES = ['fighter', 'scout', 'scholar', 'architect'];
+    // Distribute uncovered roles as bonusRoles evenly across players.
+    const ALL_ROLES = ['fighter', 'scholar', 'architect', 'fool'];
     const covered = room.players.map(p => p.role);
     const uncovered = ALL_ROLES.filter(r => !covered.includes(r));
-    if (uncovered.length > 0) {
-      const host = room.players.find(p => p.id === room.hostId);
-      if (host) host.bonusRoles = uncovered;
-    }
+    uncovered.forEach((role, i) => {
+      const target = room.players[i % room.players.length];
+      if (!target.bonusRoles) target.bonusRoles = [];
+      target.bonusRoles.push(role);
+    });
 
     setPhase(code, 'playing');
     const gs = createGameState(room.players);
@@ -258,34 +258,15 @@ io.on('connection', (socket) => {
     gs.lastChangeAt = Date.now();
   });
 
-  // ── Architect wall ────────────────────────────────────────────────────────
+  // ── Player activate (H key skill / architect decoy) ──────────────────────
 
-  socket.on('place_wall', ({ x, y }) => {
+  socket.on('player_activate', ({ x, y }) => {
     const code = socket.data.code;
     const gs   = gameStates.get(code);
     if (!gs || gs.phase !== 'playing') return;
-    placeWall(gs, socket.id, x, y);
+    activateSkill(gs, socket.id, { x, y });
     gs.lastChangeAt = Date.now();
-  });
-
-  // ── Scholar mark ──────────────────────────────────────────────────────────
-
-  socket.on('mark_monster', ({ monsterId }) => {
-    const code = socket.data.code;
-    const gs   = gameStates.get(code);
-    if (!gs || gs.phase !== 'playing') return;
-    markMonster(gs, socket.id, monsterId);
-    gs.lastChangeAt = Date.now();
-  });
-
-  // ── Scout ping ────────────────────────────────────────────────────────────
-
-  socket.on('scout_ping', ({ x, y }) => {
-    const code = socket.data.code;
-    const gs   = gameStates.get(code);
-    if (!gs || gs.phase !== 'playing') return;
-    scoutPing(gs, socket.id, x, y);
-    gs.lastChangeAt = Date.now();
+    broadcastGameState(code);
   });
 
   // ── Quick messages ────────────────────────────────────────────────────────
@@ -339,6 +320,7 @@ io.on('connection', (socket) => {
     if (!code) return;
     const gs = gameStates.get(code);
     if (gs && gs.phase === 'playing') {
+      _redistributeRolesOnLeave(gs, socket.id);
       const p = gs.players[socket.id];
       if (p) p.hp = 0;
       const result = checkEndConditions(gs);

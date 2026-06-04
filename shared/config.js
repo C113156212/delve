@@ -3,14 +3,14 @@ var CONFIG = {
   // ── 房間 ──────────────────────────────────────────
   ROOM_CODE_LENGTH: 4,
   MAX_PLAYERS: 4,
-  MIN_PLAYERS_TO_START: 1,   // solo 可玩
+  MIN_PLAYERS_TO_START: 1,
 
-  // ── 玩家血量（個人血量）──────────────────────────
+  // ── 玩家血量 ──────────────────────────────────────
   PLAYER_HP: {
-    scout:     100,
     fighter:   150,
-    scholar:   90,
+    scholar:    90,
     architect: 110,
+    fool:      100,
   },
 
   // ── 計時（秒）────────────────────────────────────
@@ -20,20 +20,29 @@ var CONFIG = {
     boss:    90,
   },
 
+  // ── 主動技能 CD（ms）─────────────────────────────
+  // 約以 700ms/beat 為基準
+  CD: {
+    FIGHTER_TAUNT:    5600,  // 8 beats
+    SCHOLAR_SLOW:     4900,  // 7 beats
+    ARCHITECT_DECOY:  4200,  // 6 beats
+    FOOL_SACRIFICE:   4900,  // 7 beats
+  },
+
   // ── 怪物 ─────────────────────────────────────────
-  MONSTER_ACTION_INTERVAL: 1500,    // ms，怪物每次行動間隔
-  MONSTER_TELEGRAPH_MS:     500,    // ms，預告動畫持續時間
+  MONSTER_ACTION_INTERVAL: 1500,
+  MONSTER_TELEGRAPH_MS:     500,
   MONSTER_BASE_DMG:         10,
 
-  // ── 建築師 ────────────────────────────────────────
-  ARCHITECT_WALL_COOLDOWN:  8000,   // ms
-  ARCHITECT_MAX_WALLS:      3,
+  // ── 建築師誘餌 ────────────────────────────────────
+  DECOY_HP:            40,  // 怪物攻擊 N 次後消失
+  DECOY_DURATION_BEAT:  3,  // 最多持續 beat 數
 
   // ── 陷阱 ─────────────────────────────────────────
   TRAPS: {
     spike: { dmg: 15,     label: '尖刺' },
-    slow:  { duration: 3, label: '減速' },  // 秒
-    push:  { force: 2,    label: '推力' },  // 格
+    slow:  { duration: 3, label: '減速' },
+    push:  { force: 2,    label: '推力' },
   },
 
   // ── 房間尺寸 ──────────────────────────────────────

@@ -3,8 +3,8 @@
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const TILE = { WALL:0, FLOOR:1, EXIT:2, TRAP:3 };
-const ROLE_COLOR = { scout:'#1D9E75', fighter:'#D85A30', scholar:'#BA7517', architect:'#7F77DD' };
-const ROLE_LABEL = { scout:'斥候', fighter:'戰士', scholar:'學者', architect:'建築師' };
+const ROLE_COLOR = { fool:'#cc44cc', fighter:'#D85A30', scholar:'#BA7517', architect:'#7F77DD' };
+const ROLE_LABEL = { fool:'愚者', fighter:'戰士', scholar:'學者', architect:'建築師' };
 const TILE_COLORS = { 0:'#111120', 1:'#0c0c14', 2:'#0a2010', 3:'#18150a' };
 
 // Stance display
@@ -556,6 +556,8 @@ function _playerScreenPos(canvas, state, now) {
 function drawQTE(canvas, state, now) {
   const myPlayer = state.players?.[gameId];
   if (!myPlayer || myPlayer.hp <= 0) return;
+  // Fool's hide_qte effect hides the QTE bar
+  if ((state.hideQteBeats || 0) > 0) return;
 
   // Show QTE using visual (display) position — appears when monster visually arrives adjacent
   const adjacent = (state.monsters || []).filter(m => {
@@ -834,22 +836,6 @@ function initGame(socket, role, playerId, playerCount) {
     document.getElementById('g-monsters').style.display='block';
   }
 
-  if (role==='scout'||isSolo) {
-    const canvas=document.getElementById('game-canvas');
-    canvas.addEventListener('contextmenu',(e)=>{
-      e.preventDefault();
-      if(mapOverlayActive&&latestState?.fullGrid){
-        const rect=canvas.getBoundingClientRect();
-        const mx=Math.floor((e.clientX-rect.left)*latestState.W/canvas.width);
-        const my=Math.floor((e.clientY-rect.top)*latestState.H/canvas.height);
-        socket.emit('scout_ping',{x:mx,y:my});
-      } else {
-        const {tx,ty}=canvasToTile(canvas,e,latestState);
-        if(tx!==null) socket.emit('scout_ping',{x:tx,y:ty});
-      }
-    });
-  }
-  if (role==='scout'&&!isSolo) buildScoutMapUI();
   buildQuickMessages(socket, role);
   buildRoleHelp(role);
 
@@ -976,9 +962,7 @@ function buildActionPad(socket, role) {
     _recordQtePress();
     _submitAndRefresh(socket);
   };
-  window._markMonster = (id) => socket.emit('mark_monster', { monsterId:id });
-
-  // Canvas: click to attack, mousemove for hover
+  // Canvas: click to attack, right-click for architect decoy, mousemove for hover
   const canvas = document.getElementById('game-canvas');
   if (canvas) {
     canvas.addEventListener('mousemove', (e) => {
@@ -989,20 +973,22 @@ function buildActionPad(socket, role) {
       canvas.style.cursor=hoverMonsterId?'crosshair':'default';
     });
     canvas.addEventListener('mouseleave',()=>{hoverMonsterId=null;canvas.style.cursor='default';});
+    canvas.addEventListener('contextmenu',(e)=>{
+      e.preventDefault();
+      if(!latestState) return;
+      const {tx,ty}=canvasToTile(canvas,e,latestState);
+      if(tx===null) return;
+      // Architect: right-click floor → place decoy
+      if(gameRole==='architect'||isSolo){
+        activateSkillClient(socket, tx, ty);
+      }
+    });
     canvas.addEventListener('click',(e)=>{
       if(!latestState) return;
       const {tx,ty}=canvasToTile(canvas,e,latestState);
       if(tx===null) return;
       const m=latestState?.monsters?.find(mo=>mo.hp>0&&mo.x===tx&&mo.y===ty);
-      // Scholar: click monster → mark it (scholar's unique action)
-      if(gameRole==='scholar'&&!isSolo&&m){
-        socket.emit('mark_monster',{monsterId:m.id}); return;
-      }
-      // Architect: click empty floor → place wall
-      if((gameRole==='architect'||isSolo)&&!m){
-        socket.emit('place_wall',{x:tx,y:ty}); return;
-      }
-      // All other roles: click monster → set as attack target
+      // All roles: click monster → set as attack target
       if(!m) return;
       pendingTargetId=m.id;
       _recordQtePress();
@@ -1200,17 +1186,6 @@ function drawPressurePlates(ctx,plates,ts,ox,oy){
     ctx.textAlign='center';ctx.textBaseline='middle';
     ctx.fillText('●',x*ts+ts/2,y*ts+ts/2);ctx.textBaseline='alphabetic';
   }
-}
-
-function drawWindmillArms(ctx,arms,ts,ox,oy,now){
-  if(!arms?.length) return;
-  const pulse=0.5+0.5*Math.sin(now/80);
-  ctx.save(); ctx.globalAlpha=0.5+pulse*0.35; ctx.fillStyle='#ff4466';
-  for(const arm of arms){
-    const cx=(arm.x-(ox||0))*ts+ts/2, cy=(arm.y-(oy||0))*ts+ts/2;
-    ctx.beginPath(); ctx.arc(cx,cy,ts*0.4,0,Math.PI*2); ctx.fill();
-  }
-  ctx.restore();
 }
 
 function drawPing(ctx,ping,ts,ox,oy,now){
@@ -1486,6 +1461,17 @@ function drawPlayer(ctx, p, ts, isMe, ox, oy, now) {
     ctx.restore();
   }
 
+  // Taunt ring: fighter actively taunting — ring shows 4-tile range
+  if (p.role === 'fighter' && latestState?.players?.[p.id]?.taunting) {
+    const pulse = 0.5 + 0.5 * Math.sin(now / 110);
+    ctx.save();
+    ctx.globalAlpha = 0.28 + pulse * 0.18;
+    ctx.beginPath(); ctx.arc(cx, cy, ts * 4.5, 0, Math.PI*2);
+    ctx.strokeStyle = '#D85A30'; ctx.lineWidth = 2;
+    ctx.setLineDash([8, 5]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
   ctx.fillStyle=ROLE_COLOR[p.role]||'#888'; ctx.fill();
   if(isMe){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();}
@@ -1526,7 +1512,6 @@ function renderScout(canvas, state, now) {
   drawGrid(ctx,state.grid,state.W,state.H,ts);
   if(state.traps) for(const t of state.traps) drawTrap(ctx,t,ts,false);
   if(state.pings) for(const p of state.pings){if(!p.bornAt)p.bornAt=performance.now();drawPing(ctx,p,ts,0,0,now);}
-  drawWindmillArms(ctx,state.windmillArms,ts,0,0,now);
   if(state.monsters) for(const m of state.monsters) if(m.hp>0) drawMonster(ctx,m,ts,0,0,now);
   drawDyingMonsters(ctx,ts,now,0,0);
   if(state.players) for(const p of Object.values(state.players)) drawPlayer(ctx,p,ts,p.id===gameId,0,0,now);
@@ -1547,7 +1532,6 @@ function renderFighter(canvas, state, now) {
   const iox=state.viewX, ioy=state.viewY;
 
   drawGrid(ctx,state.localGrid,span,span,ts);
-  drawWindmillArms(ctx,state.windmillArms,ts,smoothOx,smoothOy,now);
   if(state.monsters) for(const m of state.monsters){
     if(m.hp<=0) continue; drawMonster(ctx,m,ts,smoothOx,smoothOy,now);
     if(m.vulnerable){
@@ -1561,6 +1545,7 @@ function renderFighter(canvas, state, now) {
     }
   }
   drawDyingMonsters(ctx,ts,now,smoothOx,smoothOy);
+  if(state.decoy) drawDecoy(ctx, state.decoy, ts, smoothOx, smoothOy, now);
   if(state.players) for(const p of Object.values(state.players)){
     const lx=p.x-iox, ly=p.y-ioy;
     if(lx<-1||ly<-1||lx>span||ly>span) continue;
@@ -1582,12 +1567,7 @@ function renderArchitect(canvas, state, now) {
   ctx.clearRect(0,0,canvas.width,canvas.height);
   drawGrid(ctx,state.grid,state.W,state.H,ts);
   if(state.traps) for(const t of state.traps) drawTrap(ctx,t,ts,true);
-  if(state.myWalls) for(const w of state.myWalls){
-    ctx.fillStyle='rgba(127,119,221,0.25)'; ctx.fillRect(w.x*ts,w.y*ts,ts,ts);
-    ctx.strokeStyle='#7F77DD'; ctx.lineWidth=1; ctx.strokeRect(w.x*ts+0.5,w.y*ts+0.5,ts-1,ts-1);
-  }
   if(state.pressurePlates) drawPressurePlates(ctx,state.pressurePlates,ts,0,0);
-  drawWindmillArms(ctx,state.windmillArms,ts,0,0,now);
   if(state.monsters) for(const m of state.monsters) if(m.hp>0) drawMonster(ctx,m,ts,0,0,now);
   drawDyingMonsters(ctx,ts,now,0,0);
   if(state.players) for(const p of Object.values(state.players)) drawPlayer(ctx,p,ts,p.id===gameId,0,0,now);
@@ -1607,7 +1587,7 @@ function renderSharedView(canvas, state, now) {
   ctx.clearRect(0,0,canvas.width,canvas.height);
   if(!state.localGrid) return;
 
-  // Camera: for scout/architect follow fighter; for scholar follow self
+  // Camera: for architect/fool follow fighter; for scholar follow self
   const fighter=Object.values(state.players||{}).find(p=>p.role==='fighter');
   const camP = gameRole==='scholar'
     ? state.players?.[gameId]
@@ -1619,7 +1599,6 @@ function renderSharedView(canvas, state, now) {
   } else { smoothOx=state.viewX||0; smoothOy=state.viewY||0; }
 
   drawGrid(ctx,state.localGrid,span,span,ts);
-  drawWindmillArms(ctx,state.windmillArms,ts,smoothOx,smoothOy,now);
   if(state.pressurePlates) drawPressurePlates(ctx,state.pressurePlates,ts,smoothOx,smoothOy);
 
   // Attack range overlay
@@ -1666,18 +1645,11 @@ function renderSharedView(canvas, state, now) {
 
   drawDyingMonsters(ctx,ts,now,smoothOx,smoothOy);
 
-  // Architect: highlight own walls within viewport
-  if(gameRole==='architect'&&state.myWalls){
-    for(const w of state.myWalls){
-      const lx=w.x-(state.viewX||0), ly=w.y-(state.viewY||0);
-      if(lx<0||ly<0||lx>=span||ly>=span) continue;
-      ctx.fillStyle='rgba(127,119,221,0.35)'; ctx.fillRect(lx*ts,ly*ts,ts,ts);
-      ctx.strokeStyle='#7F77DD'; ctx.lineWidth=1; ctx.strokeRect(lx*ts+0.5,ly*ts+0.5,ts-1,ts-1);
-    }
-  }
+  // Decoy
+  if(state.decoy) drawDecoy(ctx, state.decoy, ts, smoothOx, smoothOy, now);
 
-  // Scout: pings within viewport
-  if(gameRole==='scout'&&state.pings){
+  // Pings within viewport (legacy / future use)
+  if(state.pings){
     for(const p of state.pings){
       if(!p.bornAt) p.bornAt=performance.now();
       drawPing(ctx,p,ts,smoothOx,smoothOy,now);
@@ -1693,8 +1665,8 @@ function renderSharedView(canvas, state, now) {
   drawEffects(ctx,ts,now,smoothOx,smoothOy);
   drawFloatingNums(ctx,ts,now,smoothOx,smoothOy);
 
-  // Scout map overlay (hold M)
-  if(gameRole==='scout'&&mapOverlayActive&&state.fullGrid)
+  // Map overlay (hold M) — available when fullGrid is provided
+  if(mapOverlayActive&&state.fullGrid)
     drawMapOverlay(ctx,canvas,state,now);
 
   // Crosshair
@@ -1802,9 +1774,9 @@ function renderSolo(canvas, state, now) {
   if(state.traps) for(const t of state.traps) drawTrap(ctx,t,ts,true);
   if(state.pings) for(const p of state.pings){if(!p.bornAt)p.bornAt=performance.now();drawPing(ctx,p,ts,0,0,now);}
   if(state.pressurePlates) drawPressurePlates(ctx,state.pressurePlates,ts,0,0);
-  drawWindmillArms(ctx,state.windmillArms,ts,0,0,now);
   if(state.monsters) for(const m of state.monsters) if(m.hp>0) drawMonster(ctx,m,ts,0,0,now);
   drawDyingMonsters(ctx,ts,now,0,0);
+  if(state.decoy) drawDecoy(ctx, state.decoy, ts, 0, 0, now);
   if(state.players) for(const p of Object.values(state.players)) drawPlayer(ctx,p,ts,p.id===gameId,0,0,now);
   drawProjectiles(ctx,state.projectiles,ts,0,0,now);
   drawEffects(ctx,ts,now,0,0); drawFloatingNums(ctx,ts,now,0,0);
@@ -1868,8 +1840,8 @@ function renderHUD(state) {
 
   // ── Party role chips (top-right, shows who has which role) ───────────────────
   if(state.players){
-    const ROLE_COLOR_MAP={'scout':'#1D9E75','fighter':'#D85A30','scholar':'#BA7517','architect':'#7F77DD'};
-    const ROLE_SHORT={'scout':'斥','fighter':'戰','scholar':'學','architect':'築'};
+    const ROLE_COLOR_MAP={'fool':'#cc44cc','fighter':'#D85A30','scholar':'#BA7517','architect':'#7F77DD'};
+    const ROLE_SHORT={'fool':'愚','fighter':'戰','scholar':'學','architect':'築'};
     const players=Object.values(state.players);
     // Only show when there are multiple players (solo already has g-role-badge)
     const prh = players.length>1
@@ -1886,6 +1858,63 @@ function renderHUD(state) {
       : '';
     if(prh!==_hud.partyRolesHtml){_hud.partyRolesHtml=prh;const el=_hel('g-party-roles');if(el)el.innerHTML=prh;}
   }
+}
+
+// ── Fool effect overlay ───────────────────────────────────────────────────────
+
+let _lastFoolEffectId = null;
+let _foolEffectAt = 0;
+
+function _drawFoolEffectOverlay(canvas, state, now) {
+  const id = state.foolEffectId;
+  if (!id) return;
+  if (id !== _lastFoolEffectId) { _lastFoolEffectId = id; _foolEffectAt = now; }
+  const age = now - _foolEffectAt;
+  const dur = 1800;
+  if (age > dur) return;
+  const t = age / dur;
+  const alpha = Math.max(0, (1 - t) * (1 - t) * 0.55);
+  const ctx = canvas.getContext('2d');
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#cc44cc';
+  ctx.font = `bold ${Math.max(18, canvas.height * 0.08)}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = '#cc44cc'; ctx.shadowBlur = 12;
+  ctx.fillText(`🎲 ${id}`, canvas.width / 2, canvas.height * 0.18);
+  ctx.restore();
+}
+
+// ── Decoy drawing helper ───────────────────────────────────────────────────────
+
+function drawDecoy(ctx, decoy, ts, ox, oy, now) {
+  if (!decoy) return;
+  const cx = (decoy.x - (ox||0)) * ts + ts/2;
+  const cy = (decoy.y - (oy||0)) * ts + ts/2;
+  const r = ts * 0.25;
+  const pulse = 0.6 + 0.4 * Math.sin(now / 180);
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  // Gold diamond
+  ctx.fillStyle = '#ffcc00';
+  ctx.strokeStyle = '#ffaa00';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 6 + pulse * 4;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r);
+  ctx.lineTo(cx + r, cy);
+  ctx.lineTo(cx, cy + r);
+  ctx.lineTo(cx - r, cy);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // HP label
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.max(7, ts * 0.28)}px monospace`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(decoy.hp, cx, cy);
+  ctx.restore();
 }
 
 // ── Render loop ───────────────────────────────────────────────────────────────
@@ -1906,6 +1935,7 @@ function renderLoop(now) {
     } else if(canvas&&state.localGrid) {
       renderSharedView(canvas,state,now);
       if(gameRole==='scholar') renderScholar(state);
+      if(gameRole==='fool') _drawFoolEffectOverlay(canvas, state, now);
     }
     if(canvas && state.phase==='playing') drawQTE(canvas, state, now);
     if(canvas && bossIntro) drawBossIntro(canvas.getContext('2d'), canvas, now);
@@ -1916,6 +1946,15 @@ function renderLoop(now) {
 
 // ── Input (keyboard) ──────────────────────────────────────────────────────────
 
+function activateSkillClient(socket, tx, ty) {
+  // Architect: use provided tile coordinates; others: no position needed
+  if(gameRole==='architect' && tx!=null && ty!=null){
+    socket.emit('player_activate', {x:tx, y:ty});
+  } else {
+    socket.emit('player_activate', {});
+  }
+}
+
 function setupInput(socket) {
   const actMap = { '1':'刺','2':'斬','3':'架','0':null,'j':'刺','k':'斬','l':'架','J':'刺','K':'斬','L':'架' };
 
@@ -1925,6 +1964,11 @@ function setupInput(socket) {
 
   document.addEventListener('keydown',(e)=>{
     if(e.key==='m'||e.key==='M'){ mapOverlayActive=true; return; }
+    if(e.key==='h'||e.key==='H'){
+      e.preventDefault();
+      if(latestState?.phase==='playing') activateSkillClient(socket);
+      return;
+    }
     if(e.key==='Escape'){
       pendingDir={dx:0,dy:0}; pendingTargetId=null; pendingAct=null;
       socket.emit('player_submit',{dx:0,dy:0,combatAction:null,targetId:null});
@@ -1967,10 +2011,10 @@ function buildQuickMessages(socket, role) {
 // ── Role help ─────────────────────────────────────────────────────────────────
 
 const ROLE_HELP = {
-  scout:     'WASD 自由走 · 遇怪進戰鬥模式\nJ/K/L 選招式 · 克制+治療15%\nM 看全圖 · 右鍵標記位置',
-  fighter:   'WASD 自由走 · 遇怪進戰鬥模式\nJ/K/L 選招式 · 克制+治療15%\n怪物頭下方的 QTE 條看時機！',
-  scholar:   'WASD 自由走 · 遇怪自動架格擋\n格擋成功→怪物易傷+治療\n點怪物標記・看怪物招式序列',
-  architect: 'WASD 自由走 · 遇怪進戰鬥模式\nJ/K/L 選招式 · 克制+治療15%\n點地圖放牆（最多3面）',
+  fool:      'WASD 自由走 · 遇怪進戰鬥模式\nJ/K/L 選招式 · 失敗觸發神罰效果\nH鍵消耗20HP獻祭觸發3個神罰',
+  fighter:   'WASD 自由走 · 遇怪進戰鬥模式\nJ/K/L 選招式 · 克制轉治療隊伍\nH鍵嘲諷怪物轉向3拍',
+  scholar:   'WASD 自由走 · 遇怪受到傷害\n學者無攻擊力 · 靠隊友保護\nH鍵節律震盪減速所有節拍',
+  architect: 'WASD 自由走 · 遇怪進戰鬥模式\nJ/K/L 選招式 · 克制+治療15%\nH鍵+右鍵放置誘餌吸引怪物',
 };
 
 function buildRoleHelp(role) {

@@ -100,7 +100,7 @@
     .p-name { color: #aaa; }
     .p-host { color: #BA7517; font-size: 10px; margin-left: 4px; }
     .p-role { font-size: 10px; padding: 2px 8px; border-radius: 2px; letter-spacing: 0.05em; }
-    .p-role.scout     { background: #0a2018; color: #1D9E75; }
+    .p-role.fool      { background: #1a0a18; color: #cc44cc; }
     .p-role.fighter   { background: #1a0a06; color: #D85A30; }
     .p-role.scholar   { background: #1a1206; color: #BA7517; }
     .p-role.architect { background: #0e0c1a; color: #7F77DD; }
@@ -134,7 +134,7 @@
       font-size: 11px; letter-spacing: 0.1em; padding: 3px 10px;
       border-radius: 2px; white-space: nowrap; flex-shrink: 0;
     }
-    .role-scout     { background: rgba(29,158,117,0.15); color: #1D9E75; }
+    .role-fool      { background: rgba(204,68,204,0.15);  color: #cc44cc; }
     .role-fighter   { background: rgba(216,90,48,0.15);  color: #D85A30; }
     .role-scholar   { background: rgba(186,117,23,0.15); color: #BA7517; }
     .role-architect { background: rgba(127,119,221,0.15);color: #7F77DD; }
@@ -465,13 +465,13 @@
       <b style="color:#aaa">④ 多人職業</b>
       <div class="tut-role" style="margin-top:5px">
         <span class="tut-role-name" style="color:#D85A30">■ 戰士</span>
-        <span class="tut-role-desc">輸出最高，視野有限。主要輸出擔當。</span>
-        <span class="tut-role-name" style="color:#1D9E75">▲ 斥候</span>
-        <span class="tut-role-desc">全地圖視野，右鍵標記位置，通報敵情。</span>
+        <span class="tut-role-desc">輸出最高，視野有限。H鍵嘲諷怪物。</span>
+        <span class="tut-role-name" style="color:#cc44cc">★ 愚者</span>
+        <span class="tut-role-desc">失敗觸發神罰效果，H鍵消耗血量獻祭。</span>
         <span class="tut-role-name" style="color:#BA7517">● 學者</span>
-        <span class="tut-role-desc">自動格擋近戰，格擋成功讓怪易傷。</span>
+        <span class="tut-role-desc">預告怪物招式序列，H鍵節律震盪減速。</span>
         <span class="tut-role-name" style="color:#7F77DD">◆ 建築師</span>
-        <span class="tut-role-desc">可放牆壁攔截怪物，謎題關必備。</span>
+        <span class="tut-role-desc">陷阱全知，H鍵+右鍵放置誘餌吸引怪。</span>
       </div>
     </div>
 
@@ -480,7 +480,7 @@
 </div>
 
 <!-- ══ 版本號 ══ -->
-<div id="ver-badge">v1.5.1</div>
+<div id="ver-badge">v2.0.0</div>
 <div id="online-badge"></div>
 
 <!-- ══ 遊戲結束覆蓋層 ══ -->
@@ -494,7 +494,7 @@
 <!-- ══ 畫面 1：輸入名字 ══ -->
 <div class="screen active" id="screen-name">
   <div class="game-title">DELVE</div>
-  <div class="game-sub">合作 · 資訊差 · 即時溝通 · v1.5.1</div>
+  <div class="game-sub">合作 · 資訊差 · 即時溝通 · v2.0.0</div>
   <input id="inp-name" placeholder="輸入你的名字" maxlength="12" autocomplete="off">
   <button class="primary" id="btn-enter">進入遊戲</button>
   <button id="btn-tutorial" style="margin-top:4px;font-size:11px">? 新手說明</button>
@@ -530,10 +530,10 @@
   <div class="room-code-display" id="disp-code">----</div>
 
   <div class="role-grid">
-    <div class="role-btn" id="rbtn-scout" onclick="doPickRole('scout')">
-      <span class="role-icon" style="color:#1D9E75">▲</span>
-      <span class="role-name">斥候</span>
-      <span class="role-desc">全地圖視野・標記位置</span>
+    <div class="role-btn" id="rbtn-fool" onclick="doPickRole('fool')">
+      <span class="role-icon" style="color:#cc44cc">★</span>
+      <span class="role-name">愚者</span>
+      <span class="role-desc">失敗觸發神罰・H鍵獻祭</span>
     </div>
     <div class="role-btn" id="rbtn-fighter" onclick="doPickRole('fighter')">
       <span class="role-icon" style="color:#D85A30">■</span>
@@ -543,12 +543,12 @@
     <div class="role-btn" id="rbtn-scholar" onclick="doPickRole('scholar')">
       <span class="role-icon" style="color:#BA7517">●</span>
       <span class="role-name">學者</span>
-      <span class="role-desc">怪物預告・減速標記</span>
+      <span class="role-desc">怪物預告・節律震盪</span>
     </div>
     <div class="role-btn" id="rbtn-architect" onclick="doPickRole('architect')">
       <span class="role-icon" style="color:#7F77DD">◆</span>
       <span class="role-name">建築師</span>
-      <span class="role-desc">陷阱全知・放置牆壁</span>
+      <span class="role-desc">陷阱全知・放置誘餌</span>
     </div>
   </div>
 
@@ -575,7 +575,7 @@ var isHost   = false;
 var socket   = io();
 var currentRoom = null;
 
-var ROLE_LABELS = { scout: '斥候', fighter: '戰士', scholar: '學者', architect: '建築師' };
+var ROLE_LABELS = { fool: '愚者', fighter: '戰士', scholar: '學者', architect: '建築師' };
 
 // ── 畫面切換 ──────────────────────────────────────────────────────────────────
 function show(id) {
@@ -648,7 +648,7 @@ function renderRoom(room) {
   document.getElementById('disp-code').textContent = room.code;
   var taken = {};
   room.players.forEach(function(p) { if (p.role) taken[p.role] = p.id; });
-  ['scout','fighter','scholar','architect'].forEach(function(role) {
+  ['fool','fighter','scholar','architect'].forEach(function(role) {
     var btn = document.getElementById('rbtn-' + role);
     if (!btn) return;
     var isMine = myRole === role;

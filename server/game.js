@@ -106,6 +106,28 @@ const MONSTER_DEFS = {
   boss:          { symbol:'X', color:'#ff1155', bgColor:'#440010', hpMult:1.0,  dmgMult:1.0,  size:0.55, beatMult:1.00 },  // 深紅（boss 自行管理 beatMs）
 };
 
+// ── 愚者神罰效果池 ────────────────────────────────────────────────────────────
+const FOOL_EFFECTS = [
+  { id:'balloons',     cat:'vfx',  weight:1 },
+  { id:'question',     cat:'vfx',  weight:1 },
+  { id:'stumble',      cat:'vfx',  weight:1 },
+  { id:'team_heal',    cat:'good', weight:2 },
+  { id:'scatter',      cat:'good', weight:2 },
+  { id:'mass_stun',    cat:'good', weight:2 },
+  { id:'vulnerable_all',cat:'good',weight:2 },
+  { id:'speed_boost',  cat:'good', weight:2 },
+  { id:'rage_nearest', cat:'bad',  weight:1 },
+  { id:'team_bleed',   cat:'bad',  weight:1 },
+  { id:'hide_qte',     cat:'bad',  weight:1 },
+];
+function _pickFoolEffect(catFilter) {
+  const pool = catFilter ? FOOL_EFFECTS.filter(e => catFilter.includes(e.cat)) : FOOL_EFFECTS;
+  const total = pool.reduce((s,e)=>s+e.weight,0);
+  let r = Math.random()*total;
+  for(const e of pool){ r-=e.weight; if(r<=0) return e.id; }
+  return pool[pool.length-1].id;
+}
+
 // ── Monster 8-beat attack patterns ────────────────────────────────────────────
 // 8 entries = 8 beats. '移'=approach, '閃'=dodge away, '休'=rest (immune).
 // Brute/boss always start at index 0 (predictable charge). Others random entry.
@@ -335,33 +357,6 @@ const MONSTER_AI = {
 
 // ── Boss helpers ──────────────────────────────────────────────────────────────
 
-function _updateWindmill(gs, boss) {
-  const a = gs.windmillAngle||0, arms = [];
-  for (let i = 0; i < 4; i++) {
-    const angle = a + i*Math.PI/2;
-    for (let r = 1; r <= 3; r++) {
-      const ax = Math.round(boss.x + r*Math.cos(angle));
-      const ay = Math.round(boss.y + r*Math.sin(angle));
-      if (ax>0&&ay>0&&ax<gs.W-1&&ay<gs.H-1) arms.push({x:ax,y:ay});
-    }
-  }
-  gs.windmillArms = arms;
-}
-
-function _windmillDamage(gs) {
-  if (!gs.windmillArms?.length) return;
-  const now = Date.now();
-  for (const arm of gs.windmillArms) {
-    for (const p of Object.values(gs.players)) {
-      if (p.hp<=0) continue;
-      if (p.x===arm.x && p.y===arm.y) {
-        p.hp = Math.max(0, p.hp-40);
-        _msg(gs, `${p.name} 被大風車擊中！-40HP`, now);
-      }
-    }
-  }
-}
-
 function _fireBulletHell(gs, boss) {
   const DIRS8 = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
   const now   = Date.now(), dmg = 30;
@@ -418,15 +413,11 @@ function _balanced(m, players, monsters) {
 function dist(ax,ay,bx,by){ return Math.abs(ax-bx)+Math.abs(ay-by); }
 
 function _playerDmg(player) {
-  return {fighter:18, scout:10, architect:12, scholar:8}[player.role] || 12;
-}
-
-function _playerRange(player) {
-  return 1;
-}
-
-function _isRanged(player) {
-  return false;
+  const roles = [player.role, ...(player.bonusRoles||[])];
+  if (roles.includes('fighter')) return 18;
+  if (roles.includes('architect')) return 12;
+  if (roles.includes('fool')) return 10;
+  return 0; // scholar does 0 damage
 }
 
 // ── RNG ───────────────────────────────────────────────────────────────────────
@@ -688,7 +679,8 @@ function createGameState(players, level=1) {
     const sp=spawnPts[i%spawnPts.length];
     gamePlayers[p.id]={id:p.id,name:p.name,role:p.role,bonusRoles:p.bonusRoles||[],
       x:sp.x,y:sp.y,hp:CONFIG.PLAYER_HP[p.role]||100,maxHp:CONFIG.PLAYER_HP[p.role]||100,
-      lastMove:0,lastSpecial:0,walls:[],atExit:false,comboStreak:0};
+      lastMove:0,lastSpecial:0,atExit:false,comboStreak:0,
+      taunting:false,tauntBeatsLeft:0,speedBoostUntil:0};
   });
 
   const gs={
@@ -702,9 +694,13 @@ function createGameState(players, level=1) {
     players:gamePlayers, monsters:_spawnMonsters(grid,W,H,exitX,exitY,params,0),
     projectiles:[], projSeq:0,
     pings:[], messages:[], winner:null,
-    windmillAngle:0, windmillArms:[], bossPhase2:false, bossPhase3:false,
+    bossPhase2:false, bossPhase3:false,
     bossTier:params.bossTier||0,
     isRestRoom:false, pressurePlates:null, exitOpen:undefined,
+    decoy: null,
+    scholarSlowBeats: 0,
+    hideQteBeats: 0,
+    foolEffectId: null,
   };
 
   if(params.levelType==='rest'){
@@ -749,13 +745,13 @@ function nextLevel(gs){
   for(const p of Object.values(gs.players)){
     const sp=spawnPts[i++%spawnPts.length];
     if(p.hp>0){
-      p.x=sp.x; p.y=sp.y; p.atExit=false; p.walls=[]; p.comboStreak=0;
+      p.x=sp.x; p.y=sp.y; p.atExit=false; p.comboStreak=0;
       // Rest room = full heal; boss/puzzle = 80%; normal = 70%
       const healFrac=params.levelType==='rest'?1.0:params.levelType==='boss'?0.8:0.7;
       p.hp=Math.min(p.maxHp,Math.max(p.hp,Math.floor(p.maxHp*healFrac)));
     } else if (!_isSolo) {
       // Multiplayer revival: dead players come back at level start with reduced HP
-      p.x=sp.x; p.y=sp.y; p.atExit=false; p.walls=[]; p.comboStreak=0;
+      p.x=sp.x; p.y=sp.y; p.atExit=false; p.comboStreak=0;
       const reviveFrac=params.levelType==='rest'?1.0:0.30;
       p.hp=Math.floor(p.maxHp*reviveFrac);
       _msg(gs,`💫 ${p.name} 復活！${Math.round(reviveFrac*100)}% HP`,Date.now());
@@ -770,7 +766,7 @@ function nextLevel(gs){
   gs.beat=0; gs.turn=0; gs.pendingActions={};
   gs.projectiles=[]; gs.projSeq=0;
   gs.messages=[]; gs.pings=[];
-  gs.windmillAngle=0; gs.windmillArms=[]; gs.bossPhase2=false; gs.bossPhase3=false; gs._restHealed=false;
+  gs.bossPhase2=false; gs.bossPhase3=false; gs._restHealed=false;
   gs.bossTier=params.bossTier||0;
   gs.isRestRoom=false; gs.pressurePlates=null; gs.exitOpen=undefined;
 
@@ -864,6 +860,40 @@ function startTurn(gs) {
     if(i>=maxAttackers){ attackCandidates[i].m.stance='移'; attackCandidates[i].m.rushMove2=false; }
   }
 
+  // Decrement hideQte counter
+  if (gs.hideQteBeats > 0) gs.hideQteBeats--;
+
+  // Scholar slow: extend beatMs
+  if (gs.scholarSlowBeats > 0) {
+    gs.beatMs = Math.min(1200, Math.round(gs.beatMs * 1.4));
+    gs.scholarSlowBeats--;
+  }
+
+  // Fighter taunt: override all visible monster targets to fighter
+  const taunter = Object.values(gs.players).find(p=>p.hp>0&&p.taunting);
+  if (taunter) {
+    for(const m of gs.monsters){
+      if(m.hp<=0) continue;
+      if(dist(m.x,m.y,taunter.x,taunter.y)<=4) m.nextTarget=taunter.id;
+    }
+    taunter.tauntBeatsLeft=(taunter.tauntBeatsLeft||1)-1;
+    if(taunter.tauntBeatsLeft<=0) { taunter.taunting=false; taunter.tauntBeatsLeft=0; }
+  }
+
+  // Architect decoy: override monster targets to decoy
+  if (gs.decoy) {
+    gs.decoy.beatCount = (gs.decoy.beatCount||0) + 1;
+    if (gs.decoy.beatCount >= CONFIG.DECOY_DURATION_BEAT) {
+      _msg(gs, '🪤 誘餌時間到，自動消失', Date.now());
+      gs.decoy = null;
+    } else {
+      for(const m of gs.monsters){
+        if(m.hp<=0) continue;
+        m.nextTarget = '_decoy';
+      }
+    }
+  }
+
   // Adjust this beat's speed to the primary attacker's personal rhythm.
   // Each beat is independent — brute's slow beat doesn't bleed into runner's fast beat.
   // Boss rooms manage their own beatMs via phase transitions.
@@ -921,8 +951,8 @@ function resolveTurn(gs) {
   for(const m of gs.monsters){
     if(m.hp<=0) continue;
     if(m.stunned) continue;
-    const target=m.nextTarget ? gs.players[m.nextTarget] : _nearest(m,alivePlayers);
-    if(!target||target.hp<=0) continue;
+    const target = m.nextTarget === '_decoy' ? gs.decoy : (m.nextTarget ? gs.players[m.nextTarget] : _nearest(m,alivePlayers));
+    if(!target||(target.hp!==undefined&&target.hp<=0)) { if(m.nextTarget!=='_decoy') continue; else continue; }
     if(m.stance==='閃'){
       // Evader: move AWAY from target
       _dodgeFrom(m,target,gs);
@@ -950,24 +980,31 @@ function resolveTurn(gs) {
   }
 
   // ── Step 3: Resolve combat for each player ────────────────────────────────
+
+  // Decoy combat: monsters attacking decoy
+  if (gs.decoy) {
+    for (const m of gs.monsters) {
+      if (m.hp <= 0 || m.nextTarget !== '_decoy') continue;
+      if (dist(m.x, m.y, gs.decoy.x, gs.decoy.y) > 1) continue;
+      const isActiveStance = m.stance && m.stance !== '移' && m.stance !== '全彈' && m.stance !== '休';
+      if (!isActiveStance) continue;
+      const mDmg = Math.round(gs.monsterDmg * (MONSTER_DEFS[m.monsterType]?.dmgMult || 1));
+      gs.decoy.hp -= mDmg;
+      if (gs.decoy.hp <= 0) {
+        _msg(gs, '🪤 誘餌已被摧毀！', now);
+        gs.decoy = null;
+        break;
+      }
+    }
+  }
+
   const isSoloGame=Object.keys(gs.players).length===1;
   for(const p of alivePlayers){
     if(p.hp<=0) continue;
     const sub=gs.pendingActions[p.id];
     const combatAction=sub?.combatAction||null;
-    const effectiveAction=(p.role==='scholar'&&!isSoloGame)?'架':combatAction;
-
-    // Ranged attack (scout / architect with target selected)
-    // '休' stance = immune even to ranged; '移' stance = can be shot while approaching
-    if(_isRanged(p)&&sub?.targetId!=null){
-      const rt=gs.monsters.find(mo=>mo.id===sub.targetId&&mo.hp>0);
-      if(rt&&rt.stance!=='休') _resolvePlayerRanged(p,sub.targetId,effectiveAction,gs,now);
-      for(const m of gs.monsters){
-        if(m.hp<=0||m.stance!=='射'||m.monsterType!=='archer') continue;
-        _resolveArcherShot(p,m,effectiveAction,gs,now);
-      }
-      continue;
-    }
+    // Scholar cannot fight (attack=0, input ignored)
+    const effectiveAction = (p.role==='scholar') ? null : combatAction;
 
     for(const m of gs.monsters){
       if(m.hp<=0) continue;
@@ -983,8 +1020,7 @@ function resolveTurn(gs) {
       // Damage only on active attack beats (移/休/閃-escaped = no damage)
       const isActiveStance=m.stance&&m.stance!=='移'&&m.stance!=='全彈'&&m.stance!=='休';
       if(d<=1&&isActiveStance){
-        if(p.role==='scholar'&&!isSoloGame) _resolveScholarGuard(p,m,gs,now);
-        else _resolveMelee(p,m,effectiveAction,gs,now);
+        _resolveMelee(p,m,effectiveAction,gs,now);
       }
     }
   }
@@ -994,7 +1030,6 @@ function resolveTurn(gs) {
     if(m.hp<=0) continue;
     if(m.monsterType==='boss'){
       if(m.stance==='全彈') _fireBulletHell(gs,m);
-      _windmillDamage(gs);
     }
   }
 
@@ -1024,6 +1059,10 @@ function _resolveMelee(player, monster, playerAction, gs, now) {
 
   gs.combatResults.push({ result, mx: monster.x, my: monster.y, px: player.x, py: player.y });
 
+  const isFighter = _hasRole(player,'fighter');
+  const isFool    = _hasRole(player,'fool');
+  const taunting  = isFighter && player.taunting;
+
   if (result === 'win') {
     player.comboStreak = (player.comboStreak || 0) + 1;
     const comboMult = player.comboStreak >= 4 ? 3.0
@@ -1031,138 +1070,92 @@ function _resolveMelee(player, monster, playerAction, gs, now) {
                     : player.comboStreak === 2  ? 1.5 : 1.0;
     const dmg = Math.round(_playerDmg(player) * vuln * comboMult);
 
-    // Guardian intercept: adjacent Guardian absorbs the hit instead of the target
-    const guardian = gs.monsters.find(o =>
-      o.id !== monster.id && o.hp > 0 && o.monsterType === 'guardian' &&
-      dist(o.x, o.y, monster.x, monster.y) <= 1);
-    if (guardian) {
-      guardian.hp = Math.max(0, guardian.hp - dmg);
-      _checkSplit(gs, guardian, now);
-      monster.stunTurns = Math.max(monster.stunTurns, 1);
-      const healAmt = Math.round(_playerDmg(player) * 0.10);
-      player.hp = Math.min(player.maxHp, player.hp + healAmt);
-      _msg(gs, `🛡 ${guardian.label} 攔截！-${dmg}HP ${player.name}+${healAmt}HP`, now);
-      if (guardian.hp === 0) _msg(gs, `${guardian.label} 被擊倒！`, now);
-      gs.combatResults.push({ result:'win', mx:guardian.x, my:guardian.y, px:player.x, py:player.y });
-      return;
-    }
+    if (taunting) {
+      // Taunt: damage converts to team healing
+      const healMult = player.hp < player.maxHp * 0.4 ? 0.6 : 1.0;
+      _distributeHeal(gs, Math.round(dmg * healMult));
+      // Monster still stunned but takes no damage
+    } else {
+      // Guardian intercept: adjacent Guardian absorbs the hit instead of the target
+      const guardian = gs.monsters.find(o =>
+        o.id !== monster.id && o.hp > 0 && o.monsterType === 'guardian' &&
+        dist(o.x, o.y, monster.x, monster.y) <= 1);
+      if (guardian) {
+        guardian.hp = Math.max(0, guardian.hp - dmg);
+        _checkSplit(gs, guardian, now);
+        monster.stunTurns = Math.max(monster.stunTurns, 1);
+        const healAmt = Math.round(_playerDmg(player) * 0.10);
+        if (!isFool) player.hp = Math.min(player.maxHp, player.hp + healAmt);
+        _msg(gs, `🛡 ${guardian.label} 攔截！-${dmg}HP${!isFool?` ${player.name}+${healAmt}HP`:''}`, now);
+        if (guardian.hp === 0) _msg(gs, `${guardian.label} 被擊倒！`, now);
+        gs.combatResults.push({ result:'win', mx:guardian.x, my:guardian.y, px:player.x, py:player.y });
+        return;
+      }
 
-    const prevHp = monster.hp;
-    monster.hp   = Math.max(0, monster.hp - dmg);
-
-    // Overkill: carry excess damage to nearest other alive monster
-    const overkill = Math.max(0, dmg - prevHp);
-    if (overkill > 0) {
-      const chain = gs.monsters
-        .filter(o => o.id !== monster.id && o.hp > 0)
-        .sort((a, b) => dist(a.x, a.y, player.x, player.y) - dist(b.x, b.y, player.x, player.y))[0];
-      if (chain) {
-        chain.hp = Math.max(0, chain.hp - overkill);
-        gs.combatResults.push({ result: 'win', mx: chain.x, my: chain.y, px: player.x, py: player.y });
-        _msg(gs, `💥 穿透！${overkill}傷害傳至 ${chain.label}！`, now);
-        if (chain.hp === 0) _msg(gs, `${chain.label} 被擊倒！`, now);
+      monster.hp = Math.max(0, monster.hp - dmg);
+      _checkSplit(gs, monster, now);
+      // Overkill chain
+      if (monster.hp === 0 && dmg > 0) {
+        const overkill = Math.max(0, dmg - (monster.hp + dmg));
+        if (overkill > 0) {
+          const chain = gs.monsters.find(o=>o.id!==monster.id&&o.hp>0&&dist(monster.x,monster.y,o.x,o.y)<=2);
+          if(chain){ chain.hp=Math.max(0,chain.hp-overkill); gs.combatResults.push({result:'win',mx:chain.x,my:chain.y,px:player.x,py:player.y}); }
+        }
       }
     }
 
-    // Brief stun on successful counter — brute gets 2 beats, others 1
     const stunOnWin = monster.monsterType === 'brute' ? 2 : 1;
     monster.stunTurns = Math.max(monster.stunTurns, stunOnWin);
-    // Mirror remembers player's action and adapts next stance
     if (monster.monsterType === 'mirror' && playerAction)
       monster.mirrorStance = COUNTER_OF[playerAction] || '赤';
-    // Splitter split check
-    _checkSplit(gs, monster, now);
-    const healAmt   = Math.round(_playerDmg(player) * 0.15);
-    player.hp = Math.min(player.maxHp, player.hp + healAmt);
+
+    // Self-heal on win (not for fool's 無法回血 weakness, not during taunt as that converts to team)
+    if (!isFool && !taunting) {
+      const healAmt = Math.round(_playerDmg(player) * 0.15);
+      player.hp = Math.min(player.maxHp, player.hp + healAmt);
+    }
+
     const comboNote = player.comboStreak >= 2 ? ` [×${comboMult}連擊]` : '';
-    _msg(gs, `✓ ${player.name} 反制 ${monster.label}（${playerAction}→${monster.stance}）！-${dmg}HP +${healAmt}HP${comboNote}`, now);
-    if (monster.hp === 0) _msg(gs, `${monster.label} 被擊倒！`, now);
+    _msg(gs, `✓ ${player.name} 反制 ${monster.label}！${taunting?'→治療隊伍':('-'+dmg+'HP')}${comboNote}`, now);
+    if (monster.hp === 0 && !taunting) _msg(gs, `${monster.label} 被擊倒！`, now);
 
   } else if (result === 'clash') {
     player.comboStreak = 0;
     const pdmg = Math.round(_playerDmg(player) * 0.5 * vuln);
     const mdmg = Math.round(mDmg * 0.5);
     monster.hp = Math.max(0, monster.hp - pdmg);
-    player.hp  = Math.max(0, player.hp  - mdmg);
     _checkSplit(gs, monster, now);
+
+    let playerDmgTaken = mdmg;
+    playerDmgTaken = _knightSpiritTransfer(player, playerDmgTaken, gs);
+    player.hp = Math.max(0, player.hp - playerDmgTaken);
+
     _msg(gs, `⚡ ${player.name} 與 ${monster.label} 互相攻擊！`, now);
 
   } else {
+    // LOSE
     player.comboStreak = 0;
     const rageMult = (monster.rageTurns || 0) > 0 ? 1.5 : 1;
-    const finalDmg = Math.round(mDmg * rageMult);
+    let finalDmg = Math.round(mDmg * rageMult);
+
+    // Fighter 孤立 multiplier
+    if (isFighter) finalDmg = Math.round(finalDmg * _isolationMult(player, gs));
+    // Taunt low-HP safety net
+    if (taunting && player.hp < player.maxHp * 0.4) finalDmg = Math.round(finalDmg * 0.75);
+
+    // Knight's Spirit transfer BEFORE applying damage
+    finalDmg = _knightSpiritTransfer(player, finalDmg, gs);
+
     player.hp = Math.max(0, player.hp - finalDmg);
     monster.rageTurns = 3;
-    monster.stunTurns = Math.max(monster.stunTurns, 1); // 1 beat recovery, then rages for 2 beats
-    _msg(gs, `✗ ${player.name} 被 ${monster.label}（${monster.stance}）擊中！-${finalDmg}HP${rageMult > 1 ? ' ⚡狂暴！' : ''}`, now);
-  }
-}
+    monster.stunTurns = Math.max(monster.stunTurns, 1);
 
-function _resolvePlayerRanged(player, targetId, combatAction, gs, now) {
-  const m=gs.monsters.find(mo=>mo.id===targetId&&mo.hp>0);
-  if(!m) return;
-  if(dist(player.x,player.y,m.x,m.y)>_playerRange(player)) return;
+    // Fool 神罰 passive
+    if (isFool && gs.phase === 'playing') {
+      _applyFoolEffect(gs, _pickFoolEffect(null), now);
+    }
 
-  const mDmg=Math.round(gs.monsterDmg*(MONSTER_DEFS[m.monsterType]?.dmgMult||1));
-  const pDmg=_playerDmg(player);
-  const vuln=(m.vulnerable||0)>0?1.5:1;
-  const kind=player.role==='scout'?'arrow':'rock';
-  gs.projectiles.push({id:gs.projSeq++,kind,
-    fromX:player.x,fromY:player.y,toX:m.x,toY:m.y,createdAt:now,dur:400});
-
-  const result=STANCE_RESULT[combatAction]?.[m.stance]||'lose';
-  gs.combatResults.push({result,mx:m.x,my:m.y,px:player.x,py:player.y});
-
-  if(result==='win'){
-    const dmg=Math.round(pDmg*vuln);
-    m.hp=Math.max(0,m.hp-dmg);
-    const healAmt=Math.round(pDmg*0.15);
-    player.hp=Math.min(player.maxHp,player.hp+healAmt);
-    _msg(gs,`✓ ${player.name} 遠程反制 ${m.label}！-${dmg}HP +${healAmt}HP`,now);
-    if(m.hp===0) _msg(gs,`${m.label} 被擊倒！`,now);
-  } else if(result==='clash'){
-    const dmg=Math.round(pDmg*0.5*vuln);
-    m.hp=Math.max(0,m.hp-dmg);
-    _msg(gs,`⚡ ${player.name} 遠程互拍 ${m.label}！-${dmg}HP`,now);
-  } else if(result==='block'){
-    const dmg=Math.round(pDmg*0.3*vuln);
-    m.hp=Math.max(0,m.hp-dmg);
-    _msg(gs,`🛡 ${player.name} 格擋並反擊！-${dmg}HP`,now);
-  } else {
-    _msg(gs,`✗ ${player.name} 遠程攻擊失敗！`,now);
-  }
-}
-
-function _resolveScholarGuard(player, monster, gs, now) {
-  const mDmg=Math.round(gs.monsterDmg*(MONSTER_DEFS[monster.monsterType]?.dmgMult||1));
-  const vuln=(monster.vulnerable||0)>0?1.5:1;
-  const result=STANCE_RESULT['架']?.[monster.stance]||'lose';
-  gs.combatResults.push({result,mx:monster.x,my:monster.y,px:player.x,py:player.y});
-
-  if(result==='win'){
-    const dmg=Math.round(15*vuln);
-    monster.hp=Math.max(0,monster.hp-dmg);
-    monster.vulnerable=8;
-    monster.stunTurns=Math.max(monster.stunTurns,2);
-    _checkSplit(gs, monster, now);
-    // Scholar guard heal
-    const healAmt=Math.round(player.maxHp*0.08);
-    player.hp=Math.min(player.maxHp,player.hp+healAmt);
-    _msg(gs,`🛡 ${player.name} 學者格擋成功！${monster.label} 易傷 2 拍！-${dmg}HP +${healAmt}HP`,now);
-    if(monster.hp===0) _msg(gs,`${monster.label} 被擊倒！`,now);
-  } else if(result==='clash'){
-    const dmg=Math.round(8*vuln);
-    monster.hp=Math.max(0,monster.hp-dmg);
-    player.hp=Math.max(0,player.hp-Math.round(mDmg*0.5));
-    if(!monster.vulnerable) monster.vulnerable=4;
-    _msg(gs,`⚡ ${player.name} 學者互拍！${monster.label} 易傷 1 拍！`,now);
-  } else {
-    const rageMult=(monster.rageTurns||0)>0?1.5:1;
-    const finalDmg=Math.round(mDmg*rageMult);
-    player.hp=Math.max(0,player.hp-finalDmg);
-    monster.rageTurns=3;
-    monster.stunTurns=Math.max(monster.stunTurns,1);
-    _msg(gs,`✗ ${player.name} 學者格擋失敗！-${finalDmg}HP${rageMult>1?' ⚡狂暴！':''}`,now);
+    _msg(gs, `✗ ${player.name} 被 ${monster.label} 擊中！-${finalDmg}HP${rageMult > 1 ? ' ⚡狂暴！' : ''}`, now);
   }
 }
 
@@ -1224,14 +1217,15 @@ function _playerInCombat(gs, player) {
 
 // Instant free-move: only works when no monster is within COMBAT_RANGE.
 // Returns true if moved, 'combat' if player is in combat (caller should queue), false on cooldown/invalid.
-const FREE_MOVE_COOLDOWN = 200; // ms between free steps (~5 tiles/sec)
 function movePlayerFree(gs, playerId, dx, dy) {
   const p = gs.players[playerId];
   if (!p || p.hp <= 0) return false;
   if (!dx && !dy) return false;
   if (_playerInCombat(gs, p)) return 'combat';
   const now = Date.now();
-  if (now - (p.lastFreeMove || 0) < FREE_MOVE_COOLDOWN) return false;
+  let cooldown = _hasRole(p,'architect') ? 500 : 200;
+  if(p.speedBoostUntil && p.speedBoostUntil > now) cooldown = 100;
+  if (now - (p.lastFreeMove || 0) < cooldown) return false;
   p.lastFreeMove = now;
   _movePlayerImmediate(gs, p, dx, dy, now);
   return true;
@@ -1300,69 +1294,191 @@ function _tickNormalExit(gs){
 
 // ── Player special actions (outside turn system) ──────────────────────────────
 
-const CD = { SCOUT_PING:4000, SCHOLAR_MARK:8000, ARCH_WALL:8000 };
-
 function submitPlayerAction(gs, playerId, dx, dy, combatAction, targetId) {
   const p=gs.players[playerId];
   if(!p||p.hp<=0) return;
   gs.pendingActions[playerId]={dx:dx||0,dy:dy||0,combatAction:combatAction||null,targetId:targetId||null};
 }
 
-function placeWall(gs, playerId, wx, wy) {
-  const p=gs.players[playerId];
-  if(!p||p.role!=='architect') return false;
-  const now=Date.now();
-  if(now-p.lastSpecial<CD.ARCH_WALL) return false;
-  if(wx<1||wy<1||wx>=gs.W-1||wy>=gs.H-1) return false;
-  if(gs.grid[wy][wx]!==TILE.FLOOR) return false;
-  if(Object.values(gs.players).some(pl=>pl.x===wx&&pl.y===wy)) return false;
-  if(p.walls.length>=CONFIG.ARCHITECT_MAX_WALLS){
-    const old=p.walls.shift();
-    if(gs.grid[old.y][old.x]===TILE.WALL) gs.grid[old.y][old.x]=TILE.FLOOR;
+// ── Role-based helpers ────────────────────────────────────────────────────────
+
+function _hasRole(player, role) {
+  return player.role === role || (player.bonusRoles||[]).includes(role);
+}
+
+// Fighter 孤立乘數: (1.8 - n*1.2) * 0.85, n = fraction of alive allies in 9x9 view
+function _isolationMult(fighter, gs) {
+  const alive = Object.values(gs.players).filter(p=>p.hp>0&&p.id!==fighter.id);
+  if(alive.length===0) return 1.0; // solo: no penalty
+  const VIEW = 4;
+  const inView = alive.filter(p=>dist(p.x,p.y,fighter.x,fighter.y)<=VIEW);
+  const n = inView.length / alive.length;
+  return (1.8 - n*1.2) * 0.85;
+}
+
+// Distribute healing by missing HP ratio; fool cannot receive in-combat healing
+function _distributeHeal(gs, totalHeal, allowFool=false) {
+  const players = Object.values(gs.players).filter(p=>p.hp>0);
+  const eligible = players.filter(p => allowFool || !_hasRole(p,'fool'));
+  const totalMissing = eligible.reduce((s,p)=>s+Math.max(0,p.maxHp-p.hp),0);
+  if(totalMissing===0) return;
+  for(const p of eligible){
+    const missing=Math.max(0,p.maxHp-p.hp);
+    if(missing===0) continue;
+    p.hp=Math.min(p.maxHp, p.hp+Math.round(totalHeal*missing/totalMissing));
   }
-  gs.grid[wy][wx]=TILE.WALL; p.walls.push({x:wx,y:wy}); p.lastSpecial=now;
-  _msg(gs,`建築師 ${p.name} 放置了牆壁`,now); return true;
 }
 
-function markMonster(gs, playerId, monsterId) {
-  const p=gs.players[playerId];
-  if(!p||p.role!=='scholar') return false;
+// Knight's Spirit: 30% of damage transfers to fighter in view
+function _knightSpiritTransfer(victim, damage, gs) {
+  const fighter = Object.values(gs.players).find(p=>
+    _hasRole(p,'fighter') && p.hp>0 && p.id!==victim.id &&
+    dist(p.x,p.y,victim.x,victim.y)<=4
+  );
+  if(!fighter) return damage;
+  const transfer = Math.round(damage*0.3);
+  fighter.hp = Math.max(0, fighter.hp-transfer);
+  return Math.round(damage*0.7);
+}
+
+// Apply a 神罰 effect
+function _applyFoolEffect(gs, id, now) {
+  const alivePlayers = Object.values(gs.players).filter(p=>p.hp>0);
+  const monsters = gs.monsters.filter(m=>m.hp>0);
+  _msg(gs, `🎲 神罰：${id}`, now);
+  gs.foolEffectId = id; // client reads this for visual
+  switch(id) {
+    case 'balloons': case 'question': case 'stumble': break; // vfx only
+    case 'team_heal':
+      _distributeHeal(gs, 25);
+      break;
+    case 'scatter':
+      for(const m of monsters){
+        const target=alivePlayers.reduce((c,p)=>dist(m.x,m.y,p.x,p.y)<dist(m.x,m.y,c.x,c.y)?p:c,alivePlayers[0]);
+        if(!target) continue;
+        const dx=m.x-target.x, dy=m.y-target.y;
+        let nx=m.x,ny=m.y;
+        for(let i=0;i<2;i++){
+          const cx=nx+(dx>0?1:dx<0?-1:0), cy=ny+(dy>0?1:dy<0?-1:0);
+          if(cx>=0&&cy>=0&&cx<gs.W&&cy<gs.H&&gs.grid[cy]?.[cx]!==TILE.WALL&&
+             !gs.monsters.some(o=>o.id!==m.id&&o.hp>0&&o.x===cx&&o.y===cy)){
+            nx=cx; ny=cy;
+          }
+        }
+        m.x=nx; m.y=ny;
+      }
+      break;
+    case 'mass_stun':
+      if(monsters.length>0){
+        const nearest=monsters.reduce((c,m)=>{
+          const dc=alivePlayers.reduce((mn,p)=>Math.min(mn,dist(m.x,m.y,p.x,p.y)),99);
+          const dn=alivePlayers.reduce((mn,p)=>Math.min(mn,dist(c.x,c.y,p.x,p.y)),99);
+          return dc<dn?m:c;
+        },monsters[0]);
+        nearest.stunTurns=Math.max(nearest.stunTurns,2);
+      }
+      break;
+    case 'vulnerable_all':
+      for(const m of monsters) m.vulnerable=(m.vulnerable||0)+1;
+      break;
+    case 'speed_boost': {
+      const until=Date.now()+3*(gs.beatMs||500);
+      for(const p of alivePlayers) p.speedBoostUntil=until;
+      break;
+    }
+    case 'rage_nearest':
+      if(monsters.length>0){
+        const m2=monsters.reduce((c,m)=>{
+          const dc=alivePlayers.reduce((mn,p)=>Math.min(mn,dist(m.x,m.y,p.x,p.y)),99);
+          const dn=alivePlayers.reduce((mn,p)=>Math.min(mn,dist(c.x,c.y,p.x,p.y)),99);
+          return dc<dn?m:c;
+        },monsters[0]);
+        m2.rageTurns=Math.max(m2.rageTurns||0,3);
+      }
+      break;
+    case 'team_bleed':
+      for(const p of alivePlayers) p.hp=Math.max(1,p.hp-5);
+      break;
+    case 'hide_qte':
+      gs.hideQteBeats=(gs.hideQteBeats||0)+1;
+      break;
+  }
+}
+
+// Redistribute roles when a player disconnects mid-game
+function _redistributeRolesOnLeave(gs, leavingId) {
+  const leaving = gs.players[leavingId];
+  if(!leaving) return;
+  const orphaned = [leaving.role, ...(leaving.bonusRoles||[])].filter(Boolean);
+  const remaining = Object.values(gs.players).filter(p=>p.hp>0&&p.id!==leavingId);
+  if(remaining.length===0) return;
+  orphaned.forEach((role,i)=>{
+    const target = remaining[i % remaining.length];
+    if(!target.bonusRoles) target.bonusRoles=[];
+    if(target.role!==role&&!target.bonusRoles.includes(role))
+      target.bonusRoles.push(role);
+  });
+}
+
+// Place architect decoy at position
+function placeDecoy(gs, playerId, x, y) {
+  const p = gs.players[playerId];
+  if(!p||!_hasRole(p,'architect')) return false;
   const now=Date.now();
-  if(now-p.lastSpecial<CD.SCHOLAR_MARK) return false;
-  const m=gs.monsters.find(mo=>mo.id===monsterId&&mo.hp>0);
-  if(!m) return false;
-  m.slowUntil=now+6000;
-  m.stanceRevealUntil=now+4000;
-  p.lastSpecial=now;
-  _msg(gs,`📢 學者標記 ${m.label}【${m.stance||'?'}】，全隊可見！`,now);
+  if(now-(p.lastSpecial||0)<CONFIG.CD.ARCHITECT_DECOY) return false;
+  if(x<0||y<0||x>=gs.W||y>=gs.H) return false;
+  if(gs.grid[y]?.[x]===TILE.WALL) return false;
+  if(Object.values(gs.players).some(pl=>pl.hp>0&&pl.x===x&&pl.y===y)) return false;
+  gs.decoy = { x, y, hp: CONFIG.DECOY_HP, beatCount: 0 };
+  p.lastSpecial = now;
+  _msg(gs,`🪤 ${p.name} 放置誘餌！`,now);
   return true;
 }
 
-function scoutPing(gs, playerId, x, y) {
-  const p=gs.players[playerId];
-  if(!p||p.role!=='scout') return false;
+// Activate H-key skill for the player's role
+function activateSkill(gs, playerId, extra) {
+  const p = gs.players[playerId];
+  if(!p||p.hp<=0) return false;
   const now=Date.now();
-  if(now-p.lastSpecial<CD.SCOUT_PING) return false;
-  p.lastSpecial=now;
-  gs.pings.push({x,y,from:p.name,until:now+4000});
-  return true;
+  const roles=[p.role,...(p.bonusRoles||[])];
+
+  // Architect decoy — needs position from extra
+  if(roles.includes('architect') && extra?.x!=null) {
+    return placeDecoy(gs, playerId, extra.x, extra.y);
+  }
+
+  if(now-(p.lastSpecial||0) < _skillCdForPlayer(p)) return false;
+
+  if(roles.includes('fighter')&&!p.taunting){
+    p.taunting=true; p.tauntBeatsLeft=3; p.lastSpecial=now;
+    _msg(gs,`⚔ ${p.name} 發動嘲諷！怪物全部轉向！`,now); return true;
+  }
+  if(roles.includes('scholar')&&!(gs.scholarSlowBeats>0)){
+    gs.scholarSlowBeats=2; p.lastSpecial=now;
+    _msg(gs,`🕐 ${p.name} 發動節律震盪！節拍減速！`,now); return true;
+  }
+  if(roles.includes('fool')){
+    if(p.hp<=20) return false; // not enough HP
+    p.hp-=20; p.lastSpecial=now;
+    for(let i=0;i<3;i++) _applyFoolEffect(gs, _pickFoolEffect(['good','vfx']), now);
+    _msg(gs,`🎴 ${p.name} 獻祭！觸發3個效果！`,now); return true;
+  }
+  return false;
+}
+
+function _skillCdForPlayer(p) {
+  const roles=[p.role,...(p.bonusRoles||[])];
+  if(roles.includes('fighter')) return CONFIG.CD.FIGHTER_TAUNT;
+  if(roles.includes('scholar')) return CONFIG.CD.SCHOLAR_SLOW;
+  if(roles.includes('architect')) return CONFIG.CD.ARCHITECT_DECOY;
+  if(roles.includes('fool')) return CONFIG.CD.FOOL_SACRIFICE;
+  return 99999;
 }
 
 function quickMsg(gs, playerId, text) {
   const p=gs.players[playerId];
   if(!p) return;
   _msg(gs,`[${p.name}] ${text}`,Date.now());
-}
-
-function spawnWave(gs, count) {
-  if(gs.levelType==='boss'||gs.levelType==='rest') return;
-  const params=getLevelParams(gs.level||1);
-  const hpBoost=Math.floor((gs.level||1)*8);
-  const waveParams={...params,monsters:count,baseHp:params.baseHp+hpBoost};
-  const idStart=gs.nextMonsterIdSeq||gs.monsters.length;
-  gs.monsters.push(..._spawnMonsters(gs.grid,gs.W,gs.H,gs.exitX,gs.exitY,waveParams,idStart));
-  gs.nextMonsterIdSeq=idStart+count;
-  _msg(gs,'⚠ 增援出現！',Date.now());
 }
 
 function _msg(gs,text,now){
@@ -1441,18 +1557,24 @@ function filterStateForRole(gs, role, playerId) {
   const liveProj=gs.projectiles.filter(p=>now-p.createdAt<p.dur);
   const myPlayer=gs.players[playerId];
 
+  const anyScholar = Object.values(gs.players).some(p=>p.hp>0&&_hasRole(p,'scholar'));
+  const peekBoost = anyScholar ? 3 : 0; // scholar alive = everyone sees further
+
   const base={
     tick:gs.turn, beat:gs.beat, phase:gs.phase, winner:gs.winner,
     level:gs.level||1, levelType:gs.levelType||'normal',
     timeLeft:Math.max(0,gs.startTime+gs.duration-now),
     players:playerSnap, pings:gs.pings, messages:gs.messages,
     W:gs.W, H:gs.H, projectiles:liveProj,
-    windmillArms:[], bossPhase2:gs.bossPhase2||false, bossPhase3:gs.bossPhase3||false, bossPhase4:gs.bossPhase4||false, bossTier:gs.bossTier||0,
+    bossPhase2:gs.bossPhase2||false, bossPhase3:gs.bossPhase3||false, bossPhase4:gs.bossPhase4||false, bossTier:gs.bossTier||0,
     pressurePlates:gs.pressurePlates||null, exitOpen:gs.exitOpen, isRestRoom:gs.isRestRoom||false,
     myAction:gs.pendingActions[playerId]||null,
     combatResults:gs.combatResults||[], combatResultTs:gs.combatResultTs||0,
     inCombat: myPlayer ? _playerInCombat(gs, myPlayer) : false,
     beatMs: gs.beatMs || 500,
+    decoy: gs.decoy || null,
+    hideQteBeats: gs.hideQteBeats || 0,
+    foolEffectId: gs.foolEffectId || null,
   };
 
   const specialCd=myPlayer?Math.max(0,_specialCd(role)-(now-(myPlayer.lastSpecial||0))):0;
@@ -1462,7 +1584,7 @@ function filterStateForRole(gs, role, playerId) {
   if(role==='solo'||Object.keys(gs.players).length===1){
     const alerts=_buildAlerts(gs);
     return {...base, grid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
-      monsters:gs.monsters.map(m=>_monsterSnap(m,true,3)),
+      monsters:gs.monsters.map(m=>_monsterSnap(m,true,Math.max(3,peekBoost))),
       traps:gs.traps, alerts, specialCd, isSolo:true};
   }
 
@@ -1471,9 +1593,9 @@ function filterStateForRole(gs, role, playerId) {
     const hasScholar = bonusRoles.includes('scholar') || role==='scholar';
     const alerts = hasScholar ? _buildAlerts(gs) : [];
     return {...base, grid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
-      monsters:gs.monsters.map(m=>_monsterSnap(m,true,3)),
+      monsters:gs.monsters.map(m=>_monsterSnap(m,true,Math.max(3,peekBoost))),
       traps:gs.traps, alerts, specialCd, isSolo:false, bonusRoles,
-      allMonsters: hasScholar ? gs.monsters.map(m=>_monsterSnap(m,true,3)) : undefined};
+      allMonsters: hasScholar ? gs.monsters.map(m=>_monsterSnap(m,true,Math.max(3,peekBoost))) : undefined};
   }
 
   // Fighter: 9×9 viewport, sees stances
@@ -1491,33 +1613,8 @@ function filterStateForRole(gs, role, playerId) {
     }
     const visMonsters=gs.monsters
       .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=VIEW&&Math.abs(m.y-vy)<=VIEW)
-      .map(m=>_monsterSnap(m,true,2));
-    return {...base, localGrid, viewX:vx-VIEW, viewY:vy-VIEW, monsters:visMonsters};
-  }
-
-  // Scout: 15×15 extended view (centred on fighter), stances only if revealed
-  if(role==='scout'){
-    const fighter=Object.values(gs.players).find(p=>p.role==='fighter'&&p.hp>0)
-               || Object.values(gs.players).find(p=>p.role==='fighter');
-    const SVIEW=7;
-    const vx=fighter?fighter.x:(myPlayer?myPlayer.x:0);
-    const vy=fighter?fighter.y:(myPlayer?myPlayer.y:0);
-    const localGrid=[];
-    for(let dy=-SVIEW;dy<=SVIEW;dy++){
-      const row=[];
-      for(let dx=-SVIEW;dx<=SVIEW;dx++){
-        const gx=vx+dx, gy=vy+dy;
-        row.push((gx<0||gy<0||gx>=gs.W||gy>=gs.H)?TILE.WALL:gs.grid[gy][gx]);
-      }
-      localGrid.push(row);
-    }
-    const visMonsters=gs.monsters
-      .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=SVIEW&&Math.abs(m.y-vy)<=SVIEW)
-      .map(m=>_monsterSnap(m,true,1));
-    return {...base, localGrid, viewX:vx-SVIEW, viewY:vy-SVIEW, monsters:visMonsters,
-      fullGrid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
-      traps:gs.traps.map(t=>({x:t.x,y:t.y,triggered:t.triggered})),
-      specialCd};
+      .map(m=>_monsterSnap(m,true,Math.max(2,peekBoost)));
+    return {...base, localGrid, viewX:vx-VIEW, viewY:vy-VIEW, monsters:visMonsters, specialCd};
   }
 
   // Scholar: 7×7 own viewport, sees ALL stances
@@ -1535,14 +1632,14 @@ function filterStateForRole(gs, role, playerId) {
     }
     const visMonsters=gs.monsters
       .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=SVIEW&&Math.abs(m.y-vy)<=SVIEW)
-      .map(m=>_monsterSnap(m,true,3));
+      .map(m=>_monsterSnap(m,true,Math.max(3,peekBoost)));
     return {...base, localGrid, viewX:vx-SVIEW, viewY:vy-SVIEW, monsters:visMonsters,
       alerts:_buildAlerts(gs),
-      allMonsters:gs.monsters.map(m=>_monsterSnap(m,true,3)),
+      allMonsters:gs.monsters.map(m=>_monsterSnap(m,true,Math.max(3,peekBoost))),
       specialCd};
   }
 
-  // All other roles (architect): fighter's 9×9 viewport, stances only if revealed
+  // All other roles (architect, fool): fighter's 9×9 viewport
   const sharedView=_fighterViewport(gs, myPlayer);
 
   if(role==='architect'){
@@ -1553,10 +1650,19 @@ function filterStateForRole(gs, role, playerId) {
     const vy=fighter?fighter.y:(myPlayer?myPlayer.y:0);
     const archMonsters=gs.monsters
       .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=VIEW&&Math.abs(m.y-vy)<=VIEW)
-      .map(m=>_monsterSnap(m,true,1));
+      .map(m=>_monsterSnap(m,true,Math.max(1,peekBoost)));
     return {...base, ...sharedView, monsters:archMonsters,
       fullGrid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
-      traps:gs.traps, myWalls:myPlayer?.walls||[], specialCd};
+      traps:gs.traps, specialCd};
+  }
+
+  // Fool: 9×9 viewport centered on fighter, sees stances
+  if(role==='fool'){
+    const foolMonsters = gs.monsters
+      .filter(m=>m.hp>0&&Math.abs(m.x-(myPlayer?myPlayer.x:0))<=4&&Math.abs(m.y-(myPlayer?myPlayer.y:0))<=4)
+      .map(m=>_monsterSnap(m,true,Math.max(2,peekBoost)));
+    return {...base, ...sharedView, monsters:foolMonsters, specialCd,
+      decoy:gs.decoy||null, hideQteBeats:gs.hideQteBeats||0, foolEffectId:gs.foolEffectId||null};
   }
 
   return base;
@@ -1572,16 +1678,17 @@ function _buildAlerts(gs){
 }
 
 function _specialCd(role){
-  if(role==='scout')     return CD.SCOUT_PING;
-  if(role==='scholar')   return CD.SCHOLAR_MARK;
-  if(role==='architect') return CD.ARCH_WALL;
+  if(role==='fighter')   return CONFIG.CD.FIGHTER_TAUNT;
+  if(role==='scholar')   return CONFIG.CD.SCHOLAR_SLOW;
+  if(role==='architect') return CONFIG.CD.ARCHITECT_DECOY;
+  if(role==='fool')      return CONFIG.CD.FOOL_SACRIFICE;
   return 0;
 }
 
 module.exports = {
   TILE, MAX_LEVEL, MONSTER_DEFS, BEAT_MS, BEATS_PER_TURN,
   createGameState, nextLevel,
-  startTurn, resolveTurn, spawnWave,
-  submitPlayerAction, movePlayerFree, placeWall, markMonster, scoutPing, quickMsg,
+  startTurn, resolveTurn,
+  submitPlayerAction, movePlayerFree, placeDecoy, activateSkill, _redistributeRolesOnLeave, quickMsg,
   checkEndConditions, filterStateForRole,
 };
