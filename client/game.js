@@ -560,22 +560,17 @@ function drawQTE(canvas, state, now) {
   if ((state.hideQteBeats || 0) > 0) return;
 
   // Show QTE using visual (display) position — appears when monster visually arrives adjacent
+  // Use game position d≤1: QTE shows as soon as the monster is adjacent this beat
   const adjacent = (state.monsters || []).filter(m => {
     if (m.hp <= 0 || !m.stance) return false;
     if (m.stance === '移' || m.stance === '休' || m.stance === '全彈' || m.stance === '閃') return false;
-    const dp2 = getDisplayPos('m_'+m.id, m.x, m.y, now, MONSTER_ANIM_MS);
-    const visD = Math.abs(dp2.x - myPlayer.x) + Math.abs(dp2.y - myPlayer.y);
-    return visD <= 1.1;
+    const d = Math.abs(m.x - myPlayer.x) + Math.abs(m.y - myPlayer.y);
+    return d <= 1;
   });
   if (!adjacent.length) return;
-  // Sort by visual distance
-  adjacent.sort((a,b) => {
-    const da2 = getDisplayPos('m_'+a.id, a.x, a.y, now, MONSTER_ANIM_MS);
-    const db2 = getDisplayPos('m_'+b.id, b.x, b.y, now, MONSTER_ANIM_MS);
-    const dA = Math.abs(da2.x-myPlayer.x)+Math.abs(da2.y-myPlayer.y);
-    const dB = Math.abs(db2.x-myPlayer.x)+Math.abs(db2.y-myPlayer.y);
-    return dA - dB;
-  });
+  adjacent.sort((a,b) =>
+    (Math.abs(a.x-myPlayer.x)+Math.abs(a.y-myPlayer.y)) -
+    (Math.abs(b.x-myPlayer.x)+Math.abs(b.y-myPlayer.y)));
 
   const spos = _playerScreenPos(canvas, state, now);
   if (!spos) return;
@@ -1206,11 +1201,12 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   const r   = ts*vis.size;
   const si  = STANCE_INFO[m.stance];
 
-  // Visual distance from monster's animated display position to nearest player.
-  // Using dp (visual pos) instead of m.x/m.y ensures indicators only appear
-  // once the monster has visually arrived adjacent, not while mid-animation.
-  const _visNearestD = Object.values(latestState?.players || {})
-    .reduce((min, p) => Math.min(min, Math.abs(dp.x-p.x)+Math.abs(dp.y-p.y)), 99);
+  // Game-position distance to nearest player — used to gate attack indicators.
+  // d=1 means directly adjacent (monster CAN attack this beat).
+  // Using game coords (m.x/m.y) so indicators appear immediately when the monster
+  // arrives adjacent, not delayed by the 220ms movement animation.
+  const _nearD = Object.values(latestState?.players || {})
+    .reduce((min, p) => Math.min(min, Math.abs(m.x-p.x)+Math.abs(m.y-p.y)), 99);
 
   // Beat-synced squash & stretch
   const beatAge = now - beatFlash;
@@ -1244,7 +1240,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   ctx.translate(cx, cy);
   ctx.scale(scaleX, scaleY);
 
-  if (si && m.stance!=='移' && _visNearestD <= 1.1) {
+  if (si && m.stance!=='移' && _nearD <= 1) {
     const pulse=0.5+0.5*Math.sin(now/140);
     ctx.beginPath(); ctx.arc(0,0,r+5+pulse*3,0,Math.PI*2);
     ctx.strokeStyle=`${si.color}cc`; ctx.lineWidth=2.5; ctx.stroke();
@@ -1276,7 +1272,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   ctx.fillRect(bx,by,barW*pct,barH);
 
   // ── Stance label (large) ─────────────────────────────────────────────────────
-  if (si && m.stance !== '移' && m.stance !== '休' && _visNearestD <= 1.1) {
+  if (si && m.stance !== '移' && m.stance !== '休' && _nearD <= 1) {
     const pulse = 0.6 + 0.4 * Math.sin(now / 160);
     ctx.save();
     ctx.fillStyle = si.color;
@@ -1300,7 +1296,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   // Draws corner brackets around the tile to signal "this one is coming for you"
   {
     if (m.stance && m.stance !== '移' && m.stance !== '休' && m.stance !== '全彈') {
-      if (_visNearestD <= 2) {
+      if (_nearD <= 1) {
         const blink = 0.55 + 0.45 * Math.sin(now / 90);
         const tileX = (m.x - (ox||0)) * ts;
         const tileY = (m.y - (oy||0)) * ts;
@@ -1326,7 +1322,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
 
   // ── Speed lines: fast attackers (runner / evader) telegraphing 赤 ────────────
   // Only show when close enough to actually rush-attack this beat (rushers cover 2 tiles → d≤3)
-  if ((m.monsterType === 'runner' || m.monsterType === 'evader') && m.stance === '赤' && _visNearestD <= 3) {
+  if ((m.monsterType === 'runner' || m.monsterType === 'evader') && m.stance === '赤' && _nearD <= 3) {
     const beatAge3 = now - beatFlash;
     const beatDur  = _currentBeatMs || BEAT_MS;
     const t3 = Math.min(1, beatAge3 / (beatDur * 0.85));
@@ -1347,7 +1343,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   }
 
   // ── Charge ring: brute telegraphing 黃 heavy attack (only when adjacent/closing) ──
-  if (m.monsterType === 'brute' && m.stance === '黃' && _visNearestD <= 2) {
+  if (m.monsterType === 'brute' && m.stance === '黃' && _nearD <= 2) {
     const beatAge3 = now - beatFlash;
     const beatDur  = _currentBeatMs || BEAT_MS;
     const t3 = Math.min(1, beatAge3 / beatDur);
