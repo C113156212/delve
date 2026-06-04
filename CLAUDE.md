@@ -1,7 +1,7 @@
 # DELVE — 開發速查手冊
 
 ## 版本
-v2.0.2 (2026-06-04)。角色系統全面重設計。`package.json` version 欄與 git log 同步更新。
+v2.0.3 (2026-06-04)。角色系統全面重設計。`package.json` version 欄與 git log 同步更新。
 
 ## 檔案結構
 ```

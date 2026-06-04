@@ -560,12 +560,13 @@ function drawQTE(canvas, state, now) {
   if ((state.hideQteBeats || 0) > 0) return;
 
   // Show QTE using visual (display) position — appears when monster visually arrives adjacent
-  // Use game position d≤1: QTE shows as soon as the monster is adjacent this beat
+  // QTE at d≤2: monsters at d=2 move adjacent and attack in the SAME beat,
+  // so the player needs advance warning one state-update earlier.
   const adjacent = (state.monsters || []).filter(m => {
     if (m.hp <= 0 || !m.stance) return false;
     if (m.stance === '移' || m.stance === '休' || m.stance === '全彈' || m.stance === '閃') return false;
     const d = Math.abs(m.x - myPlayer.x) + Math.abs(m.y - myPlayer.y);
-    return d <= 1;
+    return d <= 2;
   });
   if (!adjacent.length) return;
   adjacent.sort((a,b) =>
