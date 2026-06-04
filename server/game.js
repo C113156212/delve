@@ -1344,7 +1344,8 @@ function _knightSpiritTransfer(victim, damage, gs) {
 }
 
 // Apply a 神罰 effect
-function _applyFoolEffect(gs, id, now) {
+// allowFoolHeal=true when the fool themselves triggered the effect (獻祭 active skill)
+function _applyFoolEffect(gs, id, now, allowFoolHeal=false) {
   const alivePlayers = Object.values(gs.players).filter(p=>p.hp>0);
   const monsters = gs.monsters.filter(m=>m.hp>0);
   _msg(gs, `🎲 神罰：${id}`, now);
@@ -1352,7 +1353,7 @@ function _applyFoolEffect(gs, id, now) {
   switch(id) {
     case 'balloons': case 'question': case 'stumble': break; // vfx only
     case 'team_heal':
-      _distributeHeal(gs, 25);
+      _distributeHeal(gs, 25, allowFoolHeal); // 獻祭自己產生 → 可以回自己的血
       break;
     case 'scatter':
       for(const m of monsters){
@@ -1462,7 +1463,7 @@ function activateSkill(gs, playerId, extra) {
   if(role==='fool'){
     if(p.hp<=20) return false;
     p.hp-=20; p.lastSpecial=now;
-    for(let i=0;i<3;i++) _applyFoolEffect(gs, _pickFoolEffect(['good','vfx']), now);
+    for(let i=0;i<3;i++) _applyFoolEffect(gs, _pickFoolEffect(['good','vfx']), now, true);
     _msg(gs,`🎴 ${p.name} 獻祭！觸發3個效果！`,now); return true;
   }
   return false;
@@ -1556,7 +1557,7 @@ function filterStateForRole(gs, role, playerId) {
 
   const playerSnap=Object.fromEntries(Object.entries(gs.players).map(([id,p])=>[id,
     {id:p.id,name:p.name,role:p.role,bonusRoles:p.bonusRoles||[],x:p.x,y:p.y,hp:p.hp,maxHp:p.maxHp,atExit:p.atExit,
-     taunting:p.taunting||false}]));
+     taunting:p.taunting||false, speedBoostUntil:p.speedBoostUntil||0}]));
 
   const liveProj=gs.projectiles.filter(p=>now-p.createdAt<p.dur);
   const myPlayer=gs.players[playerId];

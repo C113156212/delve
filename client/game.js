@@ -1863,6 +1863,7 @@ function renderHUD(state) {
   else if(state.specialCd>0) sh+=`<span class="hud-pill">H技能 ${(state.specialCd/1000).toFixed(1)}s</span>`;
   else                        sh+=`<span class="hud-pill ready">H技能就緒</span>`;
   if((state.scholarSlowBeats||0)>0) sh+=`<span class="hud-pill warn">🕐 節律震盪中</span>`;
+  if(me?.speedBoostUntil > Date.now()) sh+=`<span class="hud-pill ready">🏃 加速中</span>`;
   if(state.pressurePlates){const done=state.pressurePlates.filter(p=>p.active).length;sh+=`<span class="hud-pill${done===state.pressurePlates.length?' ready':''}">${done}/${state.pressurePlates.length}板</span>`;}
   if(state.bossPhase2)  sh+=`<span class="hud-pill warn">⚡狂暴</span>`;
   if(state.bossPhase3)  sh+=`<span class="hud-pill warn">🔥終形態</span>`;
