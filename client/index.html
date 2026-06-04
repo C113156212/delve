@@ -32,6 +32,27 @@
     /* ── lobby styles ── */
     .game-title  { font-size: 52px; letter-spacing: 0.25em; color: #1D9E75; margin-bottom: 4px; }
     .game-sub    { font-size: 11px; color: #333; letter-spacing: 0.12em; margin-bottom: 20px; }
+    #online-badge {
+      position: fixed; top: 10px; right: 14px;
+      font-size: 10px; color: #2a4a3a; letter-spacing: 0.08em;
+    }
+    #online-badge::before { content: '● '; color: #1D9E75; }
+    .btn-quick { border-color: #1D9E75 !important; color: #1D9E75 !important; background: #040e0a !important; font-size: 14px !important; }
+    .btn-quick:hover:not(:disabled) { background: #1D9E75 !important; color: #04342C !important; }
+    #match-waiting {
+      display: none; width: 100%; text-align: center;
+      padding: 18px; border: 1px solid #1a3d2e; background: #040e0a;
+    }
+    #match-waiting.active { display: block; }
+    .match-count { font-size: 24px; color: #1D9E75; margin: 6px 0; letter-spacing: 0.1em; }
+    .match-sub   { font-size: 11px; color: #2a4a3a; }
+    .match-timer { font-size: 11px; color: #1D4030; margin-top: 4px; }
+    .countdown-bar {
+      height: 2px; background: #0a2018; margin: 10px 0 4px;
+      position: relative; overflow: hidden;
+    }
+    .countdown-fill { height: 100%; background: #1D9E75; transition: width 1s linear; }
+    #room-auto-start { font-size: 11px; color: #2a4a3a; text-align: center; margin-top: -6px; }
     input {
       width: 100%; padding: 11px 14px;
       background: #0f0f14; border: 1px solid #222; color: #e0ddd5;
@@ -454,7 +475,8 @@
 </div>
 
 <!-- ══ 版本號 ══ -->
-<div id="ver-badge">v1.4.0</div>
+<div id="ver-badge">v1.5.0</div>
+<div id="online-badge"></div>
 
 <!-- ══ 遊戲結束覆蓋層 ══ -->
 <div id="end-overlay">
@@ -467,7 +489,7 @@
 <!-- ══ 畫面 1：輸入名字 ══ -->
 <div class="screen active" id="screen-name">
   <div class="game-title">DELVE</div>
-  <div class="game-sub">合作 · 資訊差 · 即時溝通 · v1.4.0</div>
+  <div class="game-sub">合作 · 資訊差 · 即時溝通 · v1.5.0</div>
   <input id="inp-name" placeholder="輸入你的名字" maxlength="12" autocomplete="off">
   <button class="primary" id="btn-enter">進入遊戲</button>
   <button id="btn-tutorial" style="margin-top:4px;font-size:11px">? 新手說明</button>
@@ -477,8 +499,19 @@
 <!-- ══ 畫面 2：建立 / 加入 ══ -->
 <div class="screen" id="screen-lobby">
   <div class="game-title">DELVE</div>
+  <button class="btn-quick" onclick="doQuickMatch()">⚡ 快速匹配</button>
+
+  <div id="match-waiting">
+    <div class="match-sub">正在尋找隊友...</div>
+    <div class="match-count" id="match-count">1 人等待中</div>
+    <div class="countdown-bar"><div class="countdown-fill" id="match-bar" style="width:100%"></div></div>
+    <div class="match-timer" id="match-timer">15秒後自動開始</div>
+    <button onclick="doCancelMatch()" style="margin-top:8px;font-size:11px;padding:6px">取消配對</button>
+  </div>
+
+  <div class="sep" id="sep-or">或</div>
   <button class="primary" onclick="doCreateRoom()">建立新房間</button>
-  <div class="sep">或</div>
+  <div class="sep">──</div>
   <input id="inp-code" placeholder="輸入房間代碼" maxlength="4"
     style="text-align:center;font-size:22px;letter-spacing:0.25em;text-transform:uppercase">
   <button onclick="doJoinRoom()">加入房間</button>
@@ -518,6 +551,7 @@
   <button class="primary" id="btn-start" onclick="doStartGame()" disabled>
     等待所有人選擇職業...
   </button>
+  <div id="room-auto-start" style="display:none"></div>
   <div class="error" id="err-room"></div>
   <div class="hint">★ 為房主 · 一人也可單獨開始</div>
 </div>
@@ -572,6 +606,65 @@ function doJoinRoom()   {
   if (code.length !== 4) { setErr('err-lobby', '房間代碼是 4 個字元'); return; }
   setErr('err-lobby', '');
   socket.emit('join_room', { name: myName, code: code });
+}
+
+// ── 快速匹配 ──────────────────────────────────────────────────────────────────
+var _matchTimerInterval = null;
+var _matchSecondsLeft = 15;
+
+function doQuickMatch() {
+  setErr('err-lobby', '');
+  _matchSecondsLeft = 15;
+  _startMatchTimer();
+  socket.emit('quick_match', { name: myName });
+  document.getElementById('match-waiting').classList.add('active');
+  document.getElementById('sep-or').style.display = 'none';
+}
+
+function doCancelMatch() {
+  socket.emit('cancel_match');
+  _stopMatchTimer();
+  document.getElementById('match-waiting').classList.remove('active');
+  document.getElementById('sep-or').style.display = '';
+}
+
+function _startMatchTimer() {
+  clearInterval(_matchTimerInterval);
+  _matchTimerInterval = setInterval(function() {
+    _matchSecondsLeft = Math.max(0, _matchSecondsLeft - 1);
+    var pct = (_matchSecondsLeft / 15 * 100).toFixed(0) + '%';
+    var bar = document.getElementById('match-bar');
+    var timerEl = document.getElementById('match-timer');
+    if (bar) bar.style.width = pct;
+    if (timerEl) timerEl.textContent = _matchSecondsLeft + '秒後自動開始';
+  }, 1000);
+}
+
+function _stopMatchTimer() {
+  clearInterval(_matchTimerInterval);
+  _matchTimerInterval = null;
+}
+
+// ── Auto-start countdown in room ──────────────────────────────────────────────
+var _autoStartInterval = null;
+
+function _startAutoStartCountdown(ms) {
+  var el = document.getElementById('room-auto-start');
+  if (!el) return;
+  el.style.display = 'block';
+  var remaining = Math.ceil(ms / 1000);
+  el.textContent = '自動開始倒數：' + remaining + '秒';
+  _autoStartInterval = setInterval(function() {
+    remaining--;
+    if (remaining <= 0) { clearInterval(_autoStartInterval); el.style.display = 'none'; return; }
+    el.textContent = '自動開始倒數：' + remaining + '秒';
+  }, 1000);
+}
+
+function _stopAutoStart() {
+  clearInterval(_autoStartInterval);
+  var el = document.getElementById('room-auto-start');
+  if (el) el.style.display = 'none';
 }
 
 // ── 畫面 3 ────────────────────────────────────────────────────────────────────
@@ -637,17 +730,53 @@ function returnToLobby() {
   myRole   = null;
   roomCode = null;
   isHost   = false;
+  _stopMatchTimer();
+  _stopAutoStart();
+  document.getElementById('match-waiting').classList.remove('active');
+  document.getElementById('sep-or').style.display = '';
   show('screen-lobby');
 }
 
 // ── Socket 事件 ───────────────────────────────────────────────────────────────
+socket.on('online_count', function(data) {
+  var el = document.getElementById('online-badge');
+  if (el) el.textContent = data.count + ' 人在線';
+});
+
+socket.on('match_queue', function(data) {
+  var el = document.getElementById('match-count');
+  if (el) el.textContent = data.waiting + ' 人等待中';
+  _matchSecondsLeft = 15;
+  var bar = document.getElementById('match-bar');
+  if (bar) bar.style.width = '100%';
+});
+
+socket.on('match_found', function(data) {
+  _stopMatchTimer();
+  roomCode = data.code;
+  isHost = data.isHost;
+  document.getElementById('match-waiting').classList.remove('active');
+  document.getElementById('sep-or').style.display = '';
+  show('screen-room');
+  renderRoom(data.room);
+  if (data.autoStartIn) _startAutoStartCountdown(data.autoStartIn);
+});
+
+socket.on('match_cancelled', function() {
+  _stopMatchTimer();
+  document.getElementById('match-waiting').classList.remove('active');
+  document.getElementById('sep-or').style.display = '';
+});
+
 socket.on('room_created', function(data) {
   roomCode = data.code; isHost = true;
+  _stopAutoStart();
   show('screen-room'); renderRoom(data.room);
 });
 
 socket.on('room_joined', function(data) {
   roomCode = data.code; isHost = false;
+  _stopAutoStart();
   show('screen-room'); renderRoom(data.room);
 });
 
@@ -658,6 +787,7 @@ socket.on('role_confirmed', function(data) {
 });
 
 socket.on('game_start', function(data) {
+  _stopAutoStart();
   var playerCount = data.room.players.length;
   show('screen-game');
   GAME.initGame(socket, myRole, socket.id, playerCount);

@@ -23,6 +23,84 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/index.html'));
 });
 
+// ── Online count ──────────────────────────────────────────────────────────────
+let onlineCount = 0;
+let _onlineBcastTimer = null;
+function _broadcastOnline() {
+  clearTimeout(_onlineBcastTimer);
+  _onlineBcastTimer = setTimeout(() => io.emit('online_count', { count: onlineCount }), 400);
+}
+
+// ── Quick match queue ─────────────────────────────────────────────────────────
+const matchQueue = []; // [{socketId, name, joinedAt}]
+const MATCH_WAIT_MS  = 15000; // 15s before starting with any group size
+const MATCH_MAX_SIZE = 4;
+const AUTO_START_MS  = 25000; // 25s countdown in room before auto-start
+
+function _notifyQueue() {
+  matchQueue.forEach((p, i) => {
+    const s = io.sockets.sockets.get(p.socketId);
+    if (s) s.emit('match_queue', { waiting: matchQueue.length, position: i + 1 });
+  });
+}
+
+function _autoAssignRoles(room, code) {
+  const PRIORITY = ['fighter', 'scholar', 'scout', 'architect'];
+  let changed = false;
+  for (const p of room.players) {
+    if (p.role) continue;
+    const available = PRIORITY.find(r => !room.players.some(x => x.role === r));
+    if (!available) continue;
+    p.role = available;
+    changed = true;
+    const s = io.sockets.sockets.get(p.id);
+    if (s) { s.data.role = p.role; s.emit('role_confirmed', { role: p.role, room }); }
+  }
+  if (changed) io.to(code).emit('room_updated', { room });
+}
+
+function _launchMatchedRoom(code) {
+  const room = getRoom(code);
+  if (!room || room.phase !== 'lobby') return;
+  _autoAssignRoles(room, code);
+  if (!canStart(code)) return;
+  setPhase(code, 'playing');
+  const gs = createGameState(room.players);
+  gs.lastChangeAt = Date.now(); gs.lastBroadcastAt = 0;
+  gs.playerCount = room.players.length;
+  gameStates.set(code, gs);
+  startGameTicks(code);
+  io.to(code).emit('game_start', { room });
+}
+
+function tryMatch() {
+  if (matchQueue.length === 0) return;
+  const elapsed = Date.now() - matchQueue[0].joinedAt;
+  if (matchQueue.length < MATCH_MAX_SIZE && elapsed < MATCH_WAIT_MS) return;
+
+  const party = matchQueue.splice(0, Math.min(MATCH_MAX_SIZE, matchQueue.length));
+  _notifyQueue(); // update remaining waiters
+
+  const host = party[0];
+  const code = createRoom(host.socketId, host.name);
+
+  for (let i = 0; i < party.length; i++) {
+    const p = party[i];
+    const s = io.sockets.sockets.get(p.socketId);
+    if (!s) continue;
+    if (i > 0) joinRoom(code, p.socketId, p.name);
+    s.join(code);
+    s.data.code = code;
+    s.data.name = p.name;
+    s.emit('match_found', { code, room: getRoom(code), isHost: i === 0, autoStartIn: AUTO_START_MS });
+  }
+
+  // Auto-start after countdown
+  setTimeout(() => _launchMatchedRoom(code), AUTO_START_MS);
+}
+
+setInterval(tryMatch, 1000);
+
 // ── Per-room game state & timer handles ──────────────────────────────────────
 const gameStates = new Map();   // code -> gameState
 const roomTimers = new Map();   // code -> { broadcast, beat }
@@ -30,6 +108,9 @@ const roomTimers = new Map();   // code -> { broadcast, beat }
 async function broadcastGameState(code) {
   const gs = gameStates.get(code);
   if (!gs) return;
+  // Skip broadcast when state hasn't changed since last send
+  if (gs.lastBroadcastAt && gs.lastBroadcastAt >= gs.lastChangeAt) return;
+  gs.lastBroadcastAt = Date.now();
   const sockets = await io.in(code).fetchSockets();
   for (const s of sockets) {
     const role = s.data.role;
@@ -49,6 +130,7 @@ function handleResult(code, result, gs) {
       if (!gs2) return;
       if (!getRoom(code)) { gameStates.delete(code); clearAllTimers(code); return; }
       nextLevel(gs2);
+      gs2.lastChangeAt = Date.now();
       startTurn(gs2);
       broadcastGameState(code);
     }, 3000);
@@ -62,15 +144,12 @@ function handleResult(code, result, gs) {
 function startGameTicks(code) {
   const BROADCAST_MS = 100;
 
-  // Broadcast at 10 fps for smooth animations
   const broadcast = setInterval(async () => {
     const gs = gameStates.get(code);
     if (!gs || gs.phase === 'ended') { clearAllTimers(code); return; }
     await broadcastGameState(code);
   }, BROADCAST_MS);
 
-  // Beat tick – polls at 80ms but only fires when gs.beatMs has elapsed.
-  // This allows per-level beat speed without restarting the interval.
   let beatCount = 0;
   let lastBeatTime = Date.now();
   const beat = setInterval(() => {
@@ -89,6 +168,7 @@ function startGameTicks(code) {
     const result = checkEndConditions(gs);
     if (result) { handleResult(code, result, gs); return; }
     startTurn(gs);
+    gs.lastChangeAt = now; // beat always changes state
 
     io.to(code).emit('beat', { beat: gs.beat, turn: gs.turn, beatMs: gs.beatMs });
   }, 80);
@@ -104,6 +184,9 @@ function clearAllTimers(code) {
 
 // ── Socket events ─────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
+  onlineCount++;
+  socket.emit('online_count', { count: onlineCount }); // immediate for new client
+  _broadcastOnline();
 
   socket.on('create_room', ({ name }) => {
     const code = createRoom(socket.id, name);
@@ -143,34 +226,53 @@ io.on('connection', (socket) => {
 
     setPhase(code, 'playing');
     const gs = createGameState(room.players);
+    gs.lastChangeAt = Date.now(); gs.lastBroadcastAt = 0;
     gs.playerCount = room.players.length;
     gameStates.set(code, gs);
     startGameTicks(code);
     io.to(code).emit('game_start', { room });
   });
 
-  // ── Turn submission (replaces player_move + player_attack) ───────────────
+  // ── Quick match ───────────────────────────────────────────────────────────
+
+  socket.on('quick_match', ({ name }) => {
+    if (matchQueue.find(p => p.socketId === socket.id)) return;
+    if (socket.data.code) return; // already in a room
+    socket.data.name = name;
+    matchQueue.push({ socketId: socket.id, name, joinedAt: Date.now() });
+    _notifyQueue();
+    tryMatch();
+  });
+
+  socket.on('cancel_match', () => {
+    const idx = matchQueue.findIndex(p => p.socketId === socket.id);
+    if (idx !== -1) { matchQueue.splice(idx, 1); _notifyQueue(); }
+    socket.emit('match_cancelled');
+  });
+
+  // ── Turn submission ───────────────────────────────────────────────────────
 
   socket.on('player_submit', ({ dx, dy, combatAction, targetId }) => {
     const code = socket.data.code;
     const gs   = gameStates.get(code);
     if (!gs || gs.phase !== 'playing') return;
-    // Pure movement (no action): try instant free-move.
-    // Returns true=moved, 'combat'=in combat (queue for beat), false=cooldown/invalid (discard).
     if (!combatAction && !targetId) {
       const moved = movePlayerFree(gs, socket.id, dx || 0, dy || 0);
-      if (moved !== 'combat') return;   // instant move OR discard — never double-queue
+      if (moved === true) gs.lastChangeAt = Date.now();
+      if (moved !== 'combat') return;
     }
     submitPlayerAction(gs, socket.id, dx, dy, combatAction, targetId ?? null);
+    gs.lastChangeAt = Date.now();
   });
 
-  // ── Architect wall (free action, not turn-gated) ──────────────────────────
+  // ── Architect wall ────────────────────────────────────────────────────────
 
   socket.on('place_wall', ({ x, y }) => {
     const code = socket.data.code;
     const gs   = gameStates.get(code);
     if (!gs || gs.phase !== 'playing') return;
     placeWall(gs, socket.id, x, y);
+    gs.lastChangeAt = Date.now();
   });
 
   // ── Scholar mark ──────────────────────────────────────────────────────────
@@ -180,6 +282,7 @@ io.on('connection', (socket) => {
     const gs   = gameStates.get(code);
     if (!gs || gs.phase !== 'playing') return;
     markMonster(gs, socket.id, monsterId);
+    gs.lastChangeAt = Date.now();
   });
 
   // ── Scout ping ────────────────────────────────────────────────────────────
@@ -189,6 +292,7 @@ io.on('connection', (socket) => {
     const gs   = gameStates.get(code);
     if (!gs || gs.phase !== 'playing') return;
     scoutPing(gs, socket.id, x, y);
+    gs.lastChangeAt = Date.now();
   });
 
   // ── Quick messages ────────────────────────────────────────────────────────
@@ -202,7 +306,7 @@ io.on('connection', (socket) => {
       '出口在右下！','前方有陷阱！','我去吸引怪！','準備好了',
       '用架！','用刺！','用斬！','閃開！',
     ];
-    if (allowed.includes(text)) quickMsg(gs, socket.id, text);
+    if (allowed.includes(text)) { quickMsg(gs, socket.id, text); gs.lastChangeAt = Date.now(); }
   });
 
   // ── Debug cheats ──────────────────────────────────────────────────────────
@@ -216,8 +320,10 @@ io.on('connection', (socket) => {
       handleResult(code, checkEndConditions(gs), gs);
     } else if (cmd === 'kill_monsters') {
       for (const m of gs.monsters) m.hp = 0;
+      gs.lastChangeAt = Date.now();
     } else if (cmd === 'full_hp') {
       for (const p of Object.values(gs.players)) p.hp = p.maxHp;
+      gs.lastChangeAt = Date.now();
     } else if (cmd === 'goto_level') {
       const target = Math.max(1, Math.min(Number(val) || 1, MAX_LEVEL));
       gs.level = target - 1;
@@ -229,6 +335,13 @@ io.on('connection', (socket) => {
   // ── Disconnect ────────────────────────────────────────────────────────────
 
   socket.on('disconnect', () => {
+    onlineCount--;
+    _broadcastOnline();
+
+    // Remove from match queue
+    const qi = matchQueue.findIndex(p => p.socketId === socket.id);
+    if (qi !== -1) { matchQueue.splice(qi, 1); _notifyQueue(); }
+
     const code = socket.data.code;
     if (!code) return;
     const gs = gameStates.get(code);
