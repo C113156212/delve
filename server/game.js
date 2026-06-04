@@ -700,7 +700,7 @@ function createGameState(players, level=1) {
     decoy: null,
     scholarSlowBeats: 0,
     hideQteBeats: 0,
-    foolEffectId: null,
+    foolEffectIds: [],
   };
 
   if(params.levelType==='rest'){
@@ -935,7 +935,7 @@ function startTurn(gs) {
 function resolveTurn(gs) {
   if(gs.resolvedThisTurn) return;
   gs.resolvedThisTurn=true;
-  gs.foolEffectId=null; // clear previous beat's effect before new combat
+  gs.foolEffectIds=[]; // clear previous beat's effect before new combat
 
   const now=Date.now();
   const alivePlayers=Object.values(gs.players).filter(p=>p.hp>0);
@@ -1348,7 +1348,7 @@ function _applyFoolEffect(gs, id, now) {
   const alivePlayers = Object.values(gs.players).filter(p=>p.hp>0);
   const monsters = gs.monsters.filter(m=>m.hp>0);
   _msg(gs, `🎲 神罰：${id}`, now);
-  gs.foolEffectId = id; // client reads this for visual
+  gs.foolEffectIds.push(id); // client reads this for visual
   switch(id) {
     case 'balloons': case 'question': case 'stumble': break; // vfx only
     case 'team_heal':
@@ -1578,7 +1578,7 @@ function filterStateForRole(gs, role, playerId) {
     beatMs: gs.beatMs || 500,
     decoy: gs.decoy || null,
     hideQteBeats: gs.hideQteBeats || 0,
-    foolEffectId: gs.foolEffectId || null,
+    foolEffectIds: gs.foolEffectIds || [],
     scholarSlowBeats: gs.scholarSlowBeats || 0,
   };
 
@@ -1667,7 +1667,7 @@ function filterStateForRole(gs, role, playerId) {
       .filter(m=>m.hp>0&&Math.abs(m.x-(myPlayer?myPlayer.x:0))<=4&&Math.abs(m.y-(myPlayer?myPlayer.y:0))<=4)
       .map(m=>_monsterSnap(m,true,Math.max(2,peekBoost)));
     return {...base, ...sharedView, monsters:foolMonsters, specialCd,
-      decoy:gs.decoy||null, hideQteBeats:gs.hideQteBeats||0, foolEffectId:gs.foolEffectId||null};
+      decoy:gs.decoy||null, hideQteBeats:gs.hideQteBeats||0, foolEffectIds:gs.foolEffectIds||[]};
   }
 
   return base;

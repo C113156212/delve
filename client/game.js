@@ -446,7 +446,33 @@ function drawEffects(ctx, ts, now, ox, oy) {
         ctx.globalAlpha = a;
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
         ctx.strokeStyle = e.color; ctx.lineWidth = 3; ctx.stroke();
-      }
+      } else if (e.type === 'balloon') {
+      // Rising coloured balloon
+      const rise = t * ts * 2.8;
+      const wobble = Math.sin(now / 200 + (e.phase||0)) * ts * 0.18;
+      const bx = (e.px - (ox||0)) * ts + ts/2 + wobble;
+      const by = (e.py - (oy||0)) * ts - rise;
+      const br = ts * 0.14;
+      ctx.globalAlpha = Math.max(0, 1 - t * 1.1);
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI*2);
+      ctx.fillStyle = e.color; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(bx, by + br);
+      ctx.lineTo(bx - wobble * 0.3, by + br + ts * 0.22);
+      ctx.strokeStyle = e.color; ctx.lineWidth = 1.5; ctx.stroke();
+    } else if (e.type === 'heal_burst') {
+      // Green rising plus signs
+      const bx = (e.px - (ox||0)) * ts + ts/2;
+      const by = (e.py - (oy||0)) * ts + ts/2 - t * ts * 1.5;
+      ctx.globalAlpha = Math.max(0, 1 - t * 1.3);
+      ctx.fillStyle = '#44ff88';
+      ctx.font = `bold ${Math.max(12, ts * 0.38)}px monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#44ff88'; ctx.shadowBlur = 6;
+      ctx.fillText('+', bx, by);
+      ctx.shadowBlur = 0;
+    }
     }
     ctx.restore();
   }
@@ -870,6 +896,7 @@ function stopGame() {
   screenShake=null;
   // Reset caches so next session starts clean
   _gameCanvas=null; _gridOC=null; _gridOCKey='';
+  _lastFoolIds=[]; _foolSlot=null; _foolPassiveId=null; _foolPassiveAt=0;
   Object.assign(_hud, {timerS:-1,inCombat:null,level:-1,levelType:null,playersHtml:'',msgsHtml:'',specialsHtml:''});
   Object.assign(_schol, {alertsHtml:'',monstersHtml:''});
   Object.keys(_hudEl).forEach(k=>delete _hudEl[k]);
@@ -1868,53 +1895,190 @@ function renderHUD(state) {
 
 // ── Fool effect overlay ───────────────────────────────────────────────────────
 
-let _lastFoolEffectId = null;
-let _foolEffectAt = 0;
+// ── Fool visual effects system ────────────────────────────────────────────────
 
-const FOOL_EFFECT_LABELS = {
-  balloons:'🎈 氣球爆炸！', question:'❓ 問號！', stumble:'💫 踉蹌！',
-  team_heal:'💚 全隊回血！', scatter:'💥 怪物彈飛！', mass_stun:'⚡ 暈眩！',
-  vulnerable_all:'🎯 易傷！', speed_boost:'⚡ 加速！',
-  rage_nearest:'😡 最近怪狂暴', team_bleed:'🩸 全隊扣血', hide_qte:'👁 QTE消失！',
+const FOOL_EFFECT_ICONS = {
+  balloons:'🎈', question:'❓', stumble:'💫',
+  team_heal:'💚', scatter:'💥', mass_stun:'⚡',
+  vulnerable_all:'🎯', speed_boost:'🏃',
+  rage_nearest:'😡', team_bleed:'🩸', hide_qte:'👁',
 };
+const FOOL_EFFECT_LABELS = {
+  balloons:'氣球爆炸', question:'問號', stumble:'踉蹌',
+  team_heal:'全隊回血', scatter:'怪物彈飛', mass_stun:'暈眩',
+  vulnerable_all:'全怪易傷', speed_boost:'加速',
+  rage_nearest:'最近怪狂暴', team_bleed:'全隊扣血', hide_qte:'QTE消失',
+};
+const FOOL_ALL_ICONS = Object.values(FOOL_EFFECT_ICONS);
 
-function _drawFoolEffectOverlay(canvas, state, now) {
-  const id = state.foolEffectId;
-  if (!id) return;
-  if (id !== _lastFoolEffectId) { _lastFoolEffectId = id; _foolEffectAt = now; }
-  const age = now - _foolEffectAt;
-  const dur = 2000;
-  if (age > dur) return;
-  const t = age / dur;
-  const fadeAlpha = Math.max(0, (1 - t * 1.2));
-  const ctx = canvas.getContext('2d');
-  ctx.save();
+let _lastFoolIds = [];      // track to detect new events
+let _foolSlot = null;       // { effects:[], startedAt:number } — active skill slot machine
+let _foolPassiveAt = 0;     // timestamp of last passive trigger
+let _foolPassiveId = null;  // last passive effect id
 
-  // Screen flash for vfx effects
-  if (id === 'balloons' || id === 'question' || id === 'stumble') {
-    ctx.globalAlpha = Math.max(0, (1 - t * 3) * 0.3);
-    ctx.fillStyle = '#cc44cc';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  } else if (['team_heal','scatter','mass_stun','vulnerable_all','speed_boost'].includes(id)) {
-    ctx.globalAlpha = Math.max(0, (1 - t * 3) * 0.22);
-    ctx.fillStyle = '#44ff88';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  } else if (['rage_nearest','team_bleed','hide_qte'].includes(id)) {
-    ctx.globalAlpha = Math.max(0, (1 - t * 3) * 0.25);
-    ctx.fillStyle = '#ff2244';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+// Called from setLatestState when foolEffectIds changes
+function _onFoolEffects(ids, state, now) {
+  const key = ids.join(',');
+  const lastKey = _lastFoolIds.join(',');
+  if (!ids.length || key === lastKey) return;
+  _lastFoolIds = [...ids];
+
+  if (ids.length >= 3) {
+    // Active skill (獻祭): slot machine animation
+    _foolSlot = { effects: ids.slice(0, 3), startedAt: now };
+  } else {
+    // Passive (神罰): simple overlay
+    _foolPassiveId = ids[0];
+    _foolPassiveAt = now;
   }
 
-  // Label text
-  ctx.globalAlpha = fadeAlpha * 0.9;
-  const label = FOOL_EFFECT_LABELS[id] || `🎲 ${id}`;
-  const fs = Math.max(16, canvas.height * 0.075);
-  ctx.font = `bold ${fs}px monospace`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.shadowColor = '#cc44cc'; ctx.shadowBlur = 14;
-  ctx.fillStyle = '#fff';
-  ctx.fillText(label, canvas.width / 2, canvas.height * 0.2);
-  ctx.restore();
+  // Trigger canvas particle effects
+  const me = state.players?.[gameId];
+  if (me) {
+    for (const id of ids) {
+      if (id === 'balloons') {
+        for (let i = 0; i < 10; i++) {
+          const cols = ['#ff6688','#66aaff','#ffdd22','#88ff66','#ff88ff'];
+          effects.push({type:'balloon', px:me.x+(Math.random()-0.5)*1.5, py:me.y,
+            color:cols[i%cols.length], t0:now, dur:2000, phase:Math.random()*Math.PI*2});
+        }
+      } else if (id === 'team_heal') {
+        for (const p of Object.values(state.players||{})) {
+          if (p.hp > 0) effects.push({type:'heal_burst', px:p.x, py:p.y, t0:now, dur:900});
+        }
+      } else if (id === 'mass_stun') {
+        effects.push({color:'#ffdd22', t0:now, dur:350, type:'beatpulse'});
+      } else if (id === 'team_bleed') {
+        effects.push({color:'#ff2244', t0:now, dur:350, type:'beatpulse'});
+      } else if (id === 'scatter') {
+        effects.push({color:'#ff8800', t0:now, dur:280, type:'beatpulse'});
+      } else if (id === 'rage_nearest') {
+        effects.push({color:'#ff2200', t0:now, dur:400, type:'vignette'});
+      }
+    }
+  }
+}
+
+function _drawFoolEffectOverlay(canvas, now) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  // ── Slot machine (active skill) ─────────────────────────────────────────────
+  if (_foolSlot) {
+    const age = now - _foolSlot.startedAt;
+    const SLOT_DUR = 2600;
+    if (age > SLOT_DUR + 800) { _foolSlot = null; }
+    else {
+      const REEL_STOPS = [0.30, 0.55, 0.78]; // normalised time each reel stops
+      const tNorm = age / SLOT_DUR;
+      const cx = W / 2, cy = H * 0.30;
+      const panelW = Math.min(W * 0.72, 280), panelH = 130;
+      const panelAlpha = Math.min(1, age / 180);
+      const reelW = panelW / 3;
+
+      ctx.save();
+
+      // Panel background
+      ctx.globalAlpha = panelAlpha * 0.9;
+      ctx.fillStyle = '#0a0814';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(cx - panelW/2, cy - panelH/2, panelW, panelH, 10);
+      else ctx.rect(cx - panelW/2, cy - panelH/2, panelW, panelH);
+      ctx.fill();
+      ctx.strokeStyle = '#cc44cc'; ctx.lineWidth = 2; ctx.stroke();
+
+      // Title
+      ctx.globalAlpha = panelAlpha;
+      ctx.fillStyle = '#cc88ff';
+      ctx.font = `bold ${Math.max(10, H*0.025)}px monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText('🎴 獻祭！', cx, cy - panelH/2 + 8);
+
+      // Clip reels
+      ctx.save();
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(cx - panelW/2 + 4, cy - 28, panelW - 8, 56, 4);
+      else ctx.rect(cx - panelW/2 + 4, cy - 28, panelW - 8, 56);
+      ctx.clip();
+
+      for (let i = 0; i < 3; i++) {
+        const stopped = tNorm >= REEL_STOPS[i];
+        const rx = cx - panelW/2 + reelW * i + reelW/2;
+        const iconSize = Math.max(26, H * 0.062);
+        ctx.font = `${iconSize}px serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+        if (stopped) {
+          const glow = 0.6 + 0.4 * Math.sin(now / 140 + i);
+          ctx.shadowColor = '#cc44cc'; ctx.shadowBlur = 8 + glow * 6;
+          ctx.globalAlpha = panelAlpha;
+          ctx.fillText(FOOL_EFFECT_ICONS[_foolSlot.effects[i]]||'🎲', rx, cy);
+          ctx.shadowBlur = 0;
+        } else {
+          // spinning — cycle through icons at decreasing speed
+          const spinProgress = tNorm / REEL_STOPS[i];
+          const speed = 40 + (1 - spinProgress) * 120;
+          const spinIdx = Math.floor(now / speed) % FOOL_ALL_ICONS.length;
+          ctx.globalAlpha = panelAlpha * 0.4;
+          ctx.fillText(FOOL_ALL_ICONS[(spinIdx+1)%FOOL_ALL_ICONS.length], rx, cy - 40);
+          ctx.globalAlpha = panelAlpha * 0.8;
+          ctx.fillText(FOOL_ALL_ICONS[spinIdx], rx, cy);
+          ctx.globalAlpha = panelAlpha * 0.4;
+          ctx.fillText(FOOL_ALL_ICONS[(spinIdx+2)%FOOL_ALL_ICONS.length], rx, cy + 40);
+        }
+      }
+      ctx.restore(); // unclip
+
+      // Labels after all stopped
+      if (tNorm > REEL_STOPS[2] + 0.05) {
+        const lblAlpha = Math.min(1, (tNorm - REEL_STOPS[2]) / 0.12) * panelAlpha;
+        ctx.globalAlpha = lblAlpha;
+        ctx.font = `${Math.max(8, H*0.02)}px monospace`;
+        ctx.textBaseline = 'top';
+        for (let i = 0; i < 3; i++) {
+          const rx = cx - panelW/2 + reelW*i + reelW/2;
+          const lbl = FOOL_EFFECT_LABELS[_foolSlot.effects[i]] || _foolSlot.effects[i];
+          ctx.fillStyle = ['#88ffcc','#ffcc44','#ff88cc'][i];
+          ctx.textAlign = 'center';
+          ctx.fillText(lbl, rx, cy + 30);
+        }
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // ── Passive flash overlay (1 effect) ────────────────────────────────────────
+  if (_foolPassiveId && _foolPassiveAt > 0) {
+    const age = now - _foolPassiveAt;
+    const dur = 1800;
+    if (age > dur) { _foolPassiveId = null; }
+    else {
+      const t = age / dur;
+      const fadeAlpha = Math.max(0, 1 - t * 1.3);
+      ctx.save();
+      // Colour-coded flash
+      const isVfx = ['balloons','question','stumble'].includes(_foolPassiveId);
+      const isGood = ['team_heal','scatter','mass_stun','vulnerable_all','speed_boost'].includes(_foolPassiveId);
+      const flashCol = isVfx ? '#cc44cc' : isGood ? '#44ff88' : '#ff2244';
+      ctx.globalAlpha = Math.max(0, (1 - t * 3.5) * 0.28);
+      ctx.fillStyle = flashCol;
+      ctx.fillRect(0, 0, W, H);
+      // Icon + label
+      ctx.globalAlpha = fadeAlpha;
+      const icon = FOOL_EFFECT_ICONS[_foolPassiveId] || '🎲';
+      const lbl  = FOOL_EFFECT_LABELS[_foolPassiveId] || _foolPassiveId;
+      ctx.font = `${Math.max(28, H*0.075)}px serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = flashCol; ctx.shadowBlur = 16;
+      ctx.fillText(icon, W/2, H*0.18 - 10);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${Math.max(13, H*0.032)}px monospace`;
+      ctx.fillText(lbl, W/2, H*0.18 + 28);
+      ctx.restore();
+    }
+  }
 }
 
 // ── Decoy drawing helper ───────────────────────────────────────────────────────
@@ -1968,7 +2132,7 @@ function renderLoop(now) {
       if(gameRole==='scholar') renderScholar(state);
     }
     // Fool effect overlay shows for everyone (effects affect all players)
-    if(canvas && state.foolEffectId) _drawFoolEffectOverlay(canvas, state, now);
+    if(canvas) _drawFoolEffectOverlay(canvas, now);
     if(canvas && state.phase==='playing') drawQTE(canvas, state, now);
     if(canvas && bossIntro) drawBossIntro(canvas.getContext('2d'), canvas, now);
     renderHUD(state);
@@ -2067,6 +2231,8 @@ window.GAME = {
     const now = performance.now();
     updateEffects(latestState, s, now);
     syncProjectiles(s);
+    // Fool visual effects (slot machine / passive flash)
+    if ((s.foolEffectIds||[]).length) _onFoolEffects(s.foolEffectIds, s, now);
     // Boss intro: trigger when entering a boss level for the first time
     if (s.levelType === 'boss' && s.phase === 'playing' &&
         (!latestState || latestState.levelType !== 'boss' || latestState.level !== s.level)) {
