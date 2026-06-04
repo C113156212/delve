@@ -1132,11 +1132,12 @@ function fitCanvas(canvas,W,H){
 
 // ── Tile / entity rendering ───────────────────────────────────────────────────
 
-// Offscreen canvas cache — grid content is static within a level
+// Offscreen canvas cache — invalidate when exit opens or level changes
 let _gridOC = null, _gridOCKey = '';
 function drawGrid(ctx,grid,W,H,ts){
   const ls = latestState;
-  const key = `${ls?.level||0}_${W}_${H}_${ts}_${ls?.viewX||0}_${ls?.viewY||0}`;
+  // Include exitOpen in key: exit tile is added to grid when monsters die
+  const key = `${ls?.level||0}_${W}_${H}_${ts}_${ls?.viewX||0}_${ls?.viewY||0}_${ls?.exitOpen}`;
   if (key !== _gridOCKey) {
     _gridOC = document.createElement('canvas');
     _gridOC.width = W*ts; _gridOC.height = H*ts;
@@ -1782,8 +1783,12 @@ function renderHUD(state) {
   }
 
   let sh='';
-  if(state.specialCd>0)   sh+=`<span class="hud-pill">技能 ${(state.specialCd/1000).toFixed(1)}s</span>`;
-  if(state.specialCd===0) sh+=`<span class="hud-pill ready">技能就緒</span>`;
+  // Show skill state: active (taunting/slow), on cooldown, or ready
+  const me = state.players?.[gameId];
+  if(me?.taunting)           sh+=`<span class="hud-pill warn">⚔ 嘲諷中！</span>`;
+  else if(state.specialCd>0) sh+=`<span class="hud-pill">H技能 ${(state.specialCd/1000).toFixed(1)}s</span>`;
+  else                        sh+=`<span class="hud-pill ready">H技能就緒</span>`;
+  if((state.scholarSlowBeats||0)>0) sh+=`<span class="hud-pill warn">🕐 節律震盪中</span>`;
   if(state.pressurePlates){const done=state.pressurePlates.filter(p=>p.active).length;sh+=`<span class="hud-pill${done===state.pressurePlates.length?' ready':''}">${done}/${state.pressurePlates.length}板</span>`;}
   if(state.bossPhase2)  sh+=`<span class="hud-pill warn">⚡狂暴</span>`;
   if(state.bossPhase3)  sh+=`<span class="hud-pill warn">🔥終形態</span>`;

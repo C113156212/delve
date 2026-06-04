@@ -1,6 +1,6 @@
 {
   "name": "delve2",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "scripts": {
     "start": "node server/index.js",
     "server": "node server/index.js"

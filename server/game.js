@@ -1553,7 +1553,8 @@ function filterStateForRole(gs, role, playerId) {
   gs.messages=gs.messages.filter(m=>m.until>now);
 
   const playerSnap=Object.fromEntries(Object.entries(gs.players).map(([id,p])=>[id,
-    {id:p.id,name:p.name,role:p.role,bonusRoles:p.bonusRoles||[],x:p.x,y:p.y,hp:p.hp,maxHp:p.maxHp,atExit:p.atExit}]));
+    {id:p.id,name:p.name,role:p.role,bonusRoles:p.bonusRoles||[],x:p.x,y:p.y,hp:p.hp,maxHp:p.maxHp,atExit:p.atExit,
+     taunting:p.taunting||false}]));
 
   const liveProj=gs.projectiles.filter(p=>now-p.createdAt<p.dur);
   const myPlayer=gs.players[playerId];
@@ -1576,6 +1577,7 @@ function filterStateForRole(gs, role, playerId) {
     decoy: gs.decoy || null,
     hideQteBeats: gs.hideQteBeats || 0,
     foolEffectId: gs.foolEffectId || null,
+    scholarSlowBeats: gs.scholarSlowBeats || 0,
   };
 
   const specialCd=myPlayer?Math.max(0,_specialCd(role)-(now-(myPlayer.lastSpecial||0))):0;
