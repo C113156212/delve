@@ -933,9 +933,11 @@ function resolveTurn(gs) {
       if(!_blocked(m,step1.x,step1.y,gs)){
         m.x=step1.x; m.y=step1.y;
       } else {
-        // Attack-stance monster blocked by a passive ('移') monster: swap to let attacker through
+        // Attack-stance monster blocked by a passive ('移') monster: swap ONLY if the swap
+        // puts the attacker directly in attack range (step1 is adjacent to target).
+        // This prevents oscillation when monsters further back try to push forward pointlessly.
         const isAttacking=m.stance!=='移'&&m.stance!=='全彈'&&m.stance!=='休'&&m.stance!=='閃';
-        if(isAttacking){
+        if(isAttacking && dist(step1.x,step1.y,target.x,target.y)<=1){
           const blocker=gs.monsters.find(o=>o.id!==m.id&&o.hp>0&&o.x===step1.x&&o.y===step1.y&&o.stance==='移');
           if(blocker){const ox=m.x,oy=m.y; m.x=step1.x; m.y=step1.y; blocker.x=ox; blocker.y=oy;}
         }

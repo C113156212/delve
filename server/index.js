@@ -32,54 +32,34 @@ function _broadcastOnline() {
 }
 
 // ── Quick match queue ─────────────────────────────────────────────────────────
-const matchQueue = []; // [{socketId, name, joinedAt}]
-const MATCH_WAIT_MS  = 15000; // 15s before starting with any group size
+// Vote-based: start immediately when everyone agrees, or when the queue is full.
+// No countdown timer — players see how many people are waiting and can vote to start.
+const matchQueue = []; // [{socketId, name, joinedAt, voted}]
 const MATCH_MAX_SIZE = 4;
-const AUTO_START_MS  = 25000; // 25s countdown in room before auto-start
 
 function _notifyQueue() {
+  const votes = matchQueue.filter(p => p.voted).length;
   matchQueue.forEach((p, i) => {
     const s = io.sockets.sockets.get(p.socketId);
-    if (s) s.emit('match_queue', { waiting: matchQueue.length, position: i + 1 });
+    if (s) s.emit('match_queue', {
+      waiting: matchQueue.length,
+      position: i + 1,
+      votes,
+      myVoted: p.voted,
+      needMore: Math.max(0, 2 - matchQueue.length), // how many more to enable voting
+    });
   });
 }
 
-function _autoAssignRoles(room, code) {
-  const PRIORITY = ['fighter', 'scholar', 'scout', 'architect'];
-  let changed = false;
-  for (const p of room.players) {
-    if (p.role) continue;
-    const available = PRIORITY.find(r => !room.players.some(x => x.role === r));
-    if (!available) continue;
-    p.role = available;
-    changed = true;
-    const s = io.sockets.sockets.get(p.id);
-    if (s) { s.data.role = p.role; s.emit('role_confirmed', { role: p.role, room }); }
-  }
-  if (changed) io.to(code).emit('room_updated', { room });
-}
-
-function _launchMatchedRoom(code) {
-  const room = getRoom(code);
-  if (!room || room.phase !== 'lobby') return;
-  _autoAssignRoles(room, code);
-  if (!canStart(code)) return;
-  setPhase(code, 'playing');
-  const gs = createGameState(room.players);
-  gs.lastChangeAt = Date.now(); gs.lastBroadcastAt = 0;
-  gs.playerCount = room.players.length;
-  gameStates.set(code, gs);
-  startGameTicks(code);
-  io.to(code).emit('game_start', { room });
-}
-
-function tryMatch() {
+function tryMatch(forceStart = false) {
   if (matchQueue.length === 0) return;
-  const elapsed = Date.now() - matchQueue[0].joinedAt;
-  if (matchQueue.length < MATCH_MAX_SIZE && elapsed < MATCH_WAIT_MS) return;
+  const votes = matchQueue.filter(p => p.voted).length;
+  const allVoted = matchQueue.length >= 2 && votes >= matchQueue.length;
+  const isFull   = matchQueue.length >= MATCH_MAX_SIZE;
+  if (!forceStart && !allVoted && !isFull) return;
 
   const party = matchQueue.splice(0, Math.min(MATCH_MAX_SIZE, matchQueue.length));
-  _notifyQueue(); // update remaining waiters
+  _notifyQueue();
 
   const host = party[0];
   const code = createRoom(host.socketId, host.name);
@@ -92,14 +72,9 @@ function tryMatch() {
     s.join(code);
     s.data.code = code;
     s.data.name = p.name;
-    s.emit('match_found', { code, room: getRoom(code), isHost: i === 0, autoStartIn: AUTO_START_MS });
+    s.emit('match_found', { code, room: getRoom(code), isHost: i === 0 });
   }
-
-  // Auto-start after countdown
-  setTimeout(() => _launchMatchedRoom(code), AUTO_START_MS);
 }
-
-setInterval(tryMatch, 1000);
 
 // ── Per-room game state & timer handles ──────────────────────────────────────
 const gameStates = new Map();   // code -> gameState
@@ -237,9 +212,17 @@ io.on('connection', (socket) => {
 
   socket.on('quick_match', ({ name }) => {
     if (matchQueue.find(p => p.socketId === socket.id)) return;
-    if (socket.data.code) return; // already in a room
+    if (socket.data.code) return;
     socket.data.name = name;
-    matchQueue.push({ socketId: socket.id, name, joinedAt: Date.now() });
+    matchQueue.push({ socketId: socket.id, name, joinedAt: Date.now(), voted: false });
+    _notifyQueue();
+    tryMatch();
+  });
+
+  socket.on('quick_match_vote', () => {
+    const p = matchQueue.find(q => q.socketId === socket.id);
+    if (!p) return;
+    p.voted = true;
     _notifyQueue();
     tryMatch();
   });

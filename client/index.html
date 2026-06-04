@@ -41,18 +41,15 @@
     .btn-quick:hover:not(:disabled) { background: #1D9E75 !important; color: #04342C !important; }
     #match-waiting {
       display: none; width: 100%; text-align: center;
-      padding: 18px; border: 1px solid #1a3d2e; background: #040e0a;
+      padding: 16px; border: 1px solid #1a3d2e; background: #040e0a;
     }
     #match-waiting.active { display: block; }
-    .match-count { font-size: 24px; color: #1D9E75; margin: 6px 0; letter-spacing: 0.1em; }
-    .match-sub   { font-size: 11px; color: #2a4a3a; }
-    .match-timer { font-size: 11px; color: #1D4030; margin-top: 4px; }
-    .countdown-bar {
-      height: 2px; background: #0a2018; margin: 10px 0 4px;
-      position: relative; overflow: hidden;
-    }
-    .countdown-fill { height: 100%; background: #1D9E75; transition: width 1s linear; }
-    #room-auto-start { font-size: 11px; color: #2a4a3a; text-align: center; margin-top: -6px; }
+    .match-count { font-size: 26px; color: #1D9E75; margin: 6px 0; letter-spacing: 0.1em; }
+    .match-sub   { font-size: 11px; color: #2a4a3a; margin-bottom: 8px; }
+    .match-need  { font-size: 11px; color: #334; margin: 4px 0; }
+    .match-votes { font-size: 11px; color: #1D6040; margin: 4px 0; min-height: 16px; }
+    .btn-vote { margin-top: 8px !important; border-color: #1D9E75 !important; color: #1D9E75 !important; font-size: 12px !important; padding: 8px !important; }
+    .btn-vote.voted { background: #1D9E75 !important; color: #04342C !important; }
     input {
       width: 100%; padding: 11px 14px;
       background: #0f0f14; border: 1px solid #222; color: #e0ddd5;
@@ -502,11 +499,12 @@
   <button class="btn-quick" onclick="doQuickMatch()">⚡ 快速匹配</button>
 
   <div id="match-waiting">
-    <div class="match-sub">正在尋找隊友...</div>
+    <div class="match-sub">正在尋找隊友</div>
     <div class="match-count" id="match-count">1 人等待中</div>
-    <div class="countdown-bar"><div class="countdown-fill" id="match-bar" style="width:100%"></div></div>
-    <div class="match-timer" id="match-timer">15秒後自動開始</div>
-    <button onclick="doCancelMatch()" style="margin-top:8px;font-size:11px;padding:6px">取消配對</button>
+    <div class="match-need" id="match-need">再等 1 人即可投票開始</div>
+    <div class="match-votes" id="match-votes"></div>
+    <button id="btn-vote-start" class="btn-vote" onclick="doVoteStart()" disabled>投票立即開始</button>
+    <button onclick="doCancelMatch()" style="margin-top:6px;font-size:11px;padding:6px">取消配對</button>
   </div>
 
   <div class="sep" id="sep-or">或</div>
@@ -551,7 +549,6 @@
   <button class="primary" id="btn-start" onclick="doStartGame()" disabled>
     等待所有人選擇職業...
   </button>
-  <div id="room-auto-start" style="display:none"></div>
   <div class="error" id="err-room"></div>
   <div class="hint">★ 為房主 · 一人也可單獨開始</div>
 </div>
@@ -609,13 +606,11 @@ function doJoinRoom()   {
 }
 
 // ── 快速匹配 ──────────────────────────────────────────────────────────────────
-var _matchTimerInterval = null;
-var _matchSecondsLeft = 15;
+var _myVoted = false;
 
 function doQuickMatch() {
   setErr('err-lobby', '');
-  _matchSecondsLeft = 15;
-  _startMatchTimer();
+  _myVoted = false;
   socket.emit('quick_match', { name: myName });
   document.getElementById('match-waiting').classList.add('active');
   document.getElementById('sep-or').style.display = 'none';
@@ -623,48 +618,17 @@ function doQuickMatch() {
 
 function doCancelMatch() {
   socket.emit('cancel_match');
-  _stopMatchTimer();
+  _myVoted = false;
   document.getElementById('match-waiting').classList.remove('active');
   document.getElementById('sep-or').style.display = '';
 }
 
-function _startMatchTimer() {
-  clearInterval(_matchTimerInterval);
-  _matchTimerInterval = setInterval(function() {
-    _matchSecondsLeft = Math.max(0, _matchSecondsLeft - 1);
-    var pct = (_matchSecondsLeft / 15 * 100).toFixed(0) + '%';
-    var bar = document.getElementById('match-bar');
-    var timerEl = document.getElementById('match-timer');
-    if (bar) bar.style.width = pct;
-    if (timerEl) timerEl.textContent = _matchSecondsLeft + '秒後自動開始';
-  }, 1000);
-}
-
-function _stopMatchTimer() {
-  clearInterval(_matchTimerInterval);
-  _matchTimerInterval = null;
-}
-
-// ── Auto-start countdown in room ──────────────────────────────────────────────
-var _autoStartInterval = null;
-
-function _startAutoStartCountdown(ms) {
-  var el = document.getElementById('room-auto-start');
-  if (!el) return;
-  el.style.display = 'block';
-  var remaining = Math.ceil(ms / 1000);
-  el.textContent = '自動開始倒數：' + remaining + '秒';
-  _autoStartInterval = setInterval(function() {
-    remaining--;
-    if (remaining <= 0) { clearInterval(_autoStartInterval); el.style.display = 'none'; return; }
-    el.textContent = '自動開始倒數：' + remaining + '秒';
-  }, 1000);
-}
-
-function _stopAutoStart() {
-  clearInterval(_autoStartInterval);
-  var el = document.getElementById('room-auto-start');
-  if (el) el.style.display = 'none';
+function doVoteStart() {
+  if (_myVoted) return;
+  _myVoted = true;
+  socket.emit('quick_match_vote');
+  var btn = document.getElementById('btn-vote-start');
+  if (btn) { btn.classList.add('voted'); btn.textContent = '已投票'; btn.disabled = true; }
 }
 
 // ── 畫面 3 ────────────────────────────────────────────────────────────────────
@@ -730,8 +694,7 @@ function returnToLobby() {
   myRole   = null;
   roomCode = null;
   isHost   = false;
-  _stopMatchTimer();
-  _stopAutoStart();
+  _myVoted = false;
   document.getElementById('match-waiting').classList.remove('active');
   document.getElementById('sep-or').style.display = '';
   show('screen-lobby');
@@ -744,22 +707,38 @@ socket.on('online_count', function(data) {
 });
 
 socket.on('match_queue', function(data) {
-  var el = document.getElementById('match-count');
-  if (el) el.textContent = data.waiting + ' 人等待中';
-  _matchSecondsLeft = 15;
-  var bar = document.getElementById('match-bar');
-  if (bar) bar.style.width = '100%';
+  var countEl = document.getElementById('match-count');
+  if (countEl) countEl.textContent = data.waiting + ' 人等待中（最多 4 人）';
+
+  var needEl = document.getElementById('match-need');
+  if (needEl) {
+    needEl.textContent = data.needMore > 0
+      ? '再等 ' + data.needMore + ' 人即可投票開始'
+      : '可投票立即開始，或等滿 4 人自動配對';
+  }
+
+  var votesEl = document.getElementById('match-votes');
+  if (votesEl) votesEl.textContent = data.votes > 0 ? ('已有 ' + data.votes + '/' + data.waiting + ' 人投票同意') : '';
+
+  var btn = document.getElementById('btn-vote-start');
+  if (btn) {
+    btn.disabled = data.needMore > 0 || data.myVoted;
+    if (!data.myVoted) {
+      btn.classList.remove('voted');
+      btn.textContent = '投票立即開始 (' + data.votes + '/' + data.waiting + ')';
+    }
+  }
+  _myVoted = data.myVoted || false;
 });
 
 socket.on('match_found', function(data) {
-  _stopMatchTimer();
+  _myVoted = false;
   roomCode = data.code;
   isHost = data.isHost;
   document.getElementById('match-waiting').classList.remove('active');
   document.getElementById('sep-or').style.display = '';
   show('screen-room');
   renderRoom(data.room);
-  if (data.autoStartIn) _startAutoStartCountdown(data.autoStartIn);
 });
 
 socket.on('match_cancelled', function() {
@@ -770,13 +749,11 @@ socket.on('match_cancelled', function() {
 
 socket.on('room_created', function(data) {
   roomCode = data.code; isHost = true;
-  _stopAutoStart();
   show('screen-room'); renderRoom(data.room);
 });
 
 socket.on('room_joined', function(data) {
   roomCode = data.code; isHost = false;
-  _stopAutoStart();
   show('screen-room'); renderRoom(data.room);
 });
 
@@ -787,7 +764,6 @@ socket.on('role_confirmed', function(data) {
 });
 
 socket.on('game_start', function(data) {
-  _stopAutoStart();
   var playerCount = data.room.players.length;
   show('screen-game');
   GAME.initGame(socket, myRole, socket.id, playerCount);
