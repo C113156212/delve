@@ -1594,15 +1594,13 @@ function filterStateForRole(gs, role, playerId) {
       traps:gs.traps, alerts, specialCd, isSolo:true};
   }
 
-  // Player with bonus roles gets full grid + scholar alerts for covered roles
-  if(bonusRoles.length > 0){
-    const hasScholar = bonusRoles.includes('scholar') || role==='scholar';
-    const alerts = hasScholar ? _buildAlerts(gs) : [];
-    return {...base, grid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
-      monsters:gs.monsters.map(m=>_monsterSnap(m,true,Math.max(3,peekBoost))),
-      traps:gs.traps, alerts, specialCd, isSolo:false, bonusRoles,
-      allMonsters: hasScholar ? gs.monsters.map(m=>_monsterSnap(m,true,Math.max(3,peekBoost))) : undefined};
-  }
+  // Helper: extra state for bonus roles (architect = full map, scholar = alerts)
+  const hasArchBonus  = bonusRoles.includes('architect');
+  const hasScholBonus = bonusRoles.includes('scholar') || role==='scholar';
+  const bonusExtra = {
+    ...(hasArchBonus ? {fullGrid:gs.grid, exitX:gs.exitX, exitY:gs.exitY, traps:gs.traps} : {}),
+    ...(hasScholBonus ? {alerts:_buildAlerts(gs), allMonsters:gs.monsters.map(m=>_monsterSnap(m,true,Math.max(3,peekBoost)))} : {}),
+  };
 
   // Fighter: 9×9 viewport, sees stances
   if(role==='fighter'){
@@ -1620,7 +1618,7 @@ function filterStateForRole(gs, role, playerId) {
     const visMonsters=gs.monsters
       .filter(m=>m.hp>0&&Math.abs(m.x-vx)<=VIEW&&Math.abs(m.y-vy)<=VIEW)
       .map(m=>_monsterSnap(m,true,Math.max(2,peekBoost)));
-    return {...base, localGrid, viewX:vx-VIEW, viewY:vy-VIEW, monsters:visMonsters, specialCd};
+    return {...base, localGrid, viewX:vx-VIEW, viewY:vy-VIEW, monsters:visMonsters, specialCd, ...bonusExtra};
   }
 
   // Scholar: 7×7 own viewport, sees ALL stances
@@ -1642,7 +1640,7 @@ function filterStateForRole(gs, role, playerId) {
     return {...base, localGrid, viewX:vx-SVIEW, viewY:vy-SVIEW, monsters:visMonsters,
       alerts:_buildAlerts(gs),
       allMonsters:gs.monsters.map(m=>_monsterSnap(m,true,Math.max(3,peekBoost))),
-      specialCd};
+      specialCd, ...bonusExtra};
   }
 
   // All other roles (architect, fool): fighter's 9×9 viewport
@@ -1659,7 +1657,7 @@ function filterStateForRole(gs, role, playerId) {
       .map(m=>_monsterSnap(m,true,Math.max(1,peekBoost)));
     return {...base, ...sharedView, monsters:archMonsters,
       fullGrid:gs.grid, exitX:gs.exitX, exitY:gs.exitY,
-      traps:gs.traps, specialCd};
+      traps:gs.traps, specialCd, ...bonusExtra};
   }
 
   // Fool: 9×9 viewport centered on fighter, sees stances
@@ -1668,10 +1666,10 @@ function filterStateForRole(gs, role, playerId) {
       .filter(m=>m.hp>0&&Math.abs(m.x-(myPlayer?myPlayer.x:0))<=4&&Math.abs(m.y-(myPlayer?myPlayer.y:0))<=4)
       .map(m=>_monsterSnap(m,true,Math.max(2,peekBoost)));
     return {...base, ...sharedView, monsters:foolMonsters, specialCd,
-      decoy:gs.decoy||null, hideQteBeats:gs.hideQteBeats||0, foolEffectIds:gs.foolEffectIds||[]};
+      decoy:gs.decoy||null, hideQteBeats:gs.hideQteBeats||0, foolEffectIds:gs.foolEffectIds||[], ...bonusExtra};
   }
 
-  return base;
+  return {...base, ...bonusExtra};
 }
 
 function _buildAlerts(gs){
