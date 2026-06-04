@@ -24,9 +24,15 @@ const MONSTER_PATTERNS_CLIENT = {
   basic:   ['赤','移','蒼','移','黃','移','移','休'],
   runner:  ['赤','赤','赤','休','赤','赤','赤','休'],
   brute:   ['移','移','黃','移','移','黃','移','黃'],  // charges 2, heavy ×3
-  evader:  ['閃','移','閃','赤','閃','移','閃','赤'],
-  archer:  ['射','移','射','射','休','射','移','射'],
-  boss:    ['赤','移','蒼','移','黃','移','全彈','移'],
+  evader:        ['赤','移','赤','休','赤','移','赤','休'],
+  archer:        ['射','移','射','射','休','射','移','射'],
+  splitter:      ['赤','移','黃','移','赤','蒼','移','休'],
+  splitter_mini: ['赤','移','赤','休','赤','移','赤','休'],
+  mirror:        ['赤','移','赤','移','赤','移','赤','休'],
+  bomber:        ['赤','移','赤','移','赤','移','赤','移'],
+  guardian:      ['黃','移','黃','移','黃','休','移','黃'],
+  summoner:      ['休','休','蒼','休','休','休','蒼','休'],
+  boss:          ['赤','移','蒼','移','黃','移','全彈','移'],
 };
 
 const ACTION_INFO = {
@@ -47,12 +53,18 @@ const RESULT_COLOR = { win:'#44ff88', clash:'#ffcc22', lose:'#ff4444', block:'#4
 const RESULT_LABEL = { win:'克', clash:'拍', lose:'敗', block:'格', none:'—' };
 
 const MONSTER_VIS = {
-  basic:  { color:'#dd3333', bgColor:'#550a0a', size:0.38 },  // 紅
-  runner: { color:'#ff8800', bgColor:'#5a2a00', size:0.30 },  // 橙
-  brute:  { color:'#5566ff', bgColor:'#12184a', size:0.46 },  // 藍
-  evader: { color:'#22cc88', bgColor:'#0a3a22', size:0.32 },  // 翠綠
-  archer: { color:'#ddbb22', bgColor:'#3a3000', size:0.33 },  // 金
-  boss:   { color:'#ff1155', bgColor:'#440010', size:0.55 },  // 深紅
+  basic:         { color:'#dd3333', bgColor:'#550a0a', size:0.38 },  // 紅
+  runner:        { color:'#ff8800', bgColor:'#5a2a00', size:0.30 },  // 橙
+  brute:         { color:'#5566ff', bgColor:'#12184a', size:0.46 },  // 藍
+  evader:        { color:'#22cc88', bgColor:'#0a3a22', size:0.32 },  // 翠綠
+  archer:        { color:'#ddbb22', bgColor:'#3a3000', size:0.33 },  // 金
+  splitter:      { color:'#ff44aa', bgColor:'#3a0a1e', size:0.42 },  // 粉紅
+  splitter_mini: { color:'#ff44aa', bgColor:'#3a0a1e', size:0.24 },  // 粉紅小
+  mirror:        { color:'#aabbff', bgColor:'#0c0c22', size:0.38 },  // 銀藍
+  bomber:        { color:'#ff6600', bgColor:'#3a1800', size:0.34 },  // 橙紅
+  guardian:      { color:'#4455ee', bgColor:'#0a0a2a', size:0.44 },  // 深藍
+  summoner:      { color:'#aa44ff', bgColor:'#1a0a2a', size:0.36 },  // 紫
+  boss:          { color:'#ff1155', bgColor:'#440010', size:0.55 },  // 深紅
 };
 
 const PLAYER_ANIM_MS  = 140;
@@ -94,6 +106,8 @@ let beatFlash   = 0;      // performance.now() of last beat event
 
 let qtePressT    = null;   // 0-1: beat position when player last pressed
 let qteResultAt  = null;   // performance.now() of that press
+let _currentBeatMs = BEAT_MS; // updated on each beat event (per-attacker speed)
+let bossIntro    = null;   // { startAt, tier, name, maxHp }
 let _soloCamOx   = 0;      // corridor solo camera: world X offset
 let _soloCamTs   = 20;     // corridor solo camera: tile size
 let prevInCombat = false;  // for detecting combat mode transitions
@@ -127,6 +141,108 @@ function _lerp(dp, now, animMs) {
   return { x:dp.sx+(dp.tx-dp.sx)*e, y:dp.sy+(dp.ty-dp.sy)*e };
 }
 
+// ── Boss intro animation ──────────────────────────────────────────────────────
+
+const BOSS_NAMES = ['試煉巡衛', '狂獵者', '深淵主宰', '虛空之主'];
+const BOSS_SUBTITLES = ['第一大關', '第二大關', '第三大關', '第四大關'];
+
+function _triggerBossIntro(state) {
+  const tier = state.bossTier || 1;
+  const bossM = (state.monsters || []).find(m => m.monsterType === 'boss');
+  bossIntro = { startAt: performance.now(), tier, name: BOSS_NAMES[tier-1] || 'BOSS',
+                subtitle: BOSS_SUBTITLES[tier-1] || '', maxHp: bossM?.maxHp || 0 };
+}
+
+function drawBossIntro(ctx, canvas, now) {
+  if (!bossIntro) return;
+  const age = now - bossIntro.startAt;
+  const TOTAL = 3800;
+  if (age > TOTAL) { bossIntro = null; return; }
+
+  const t = age / TOTAL;
+  // alpha curve: ramp in 0→0.12, hold 0.12→0.72, ramp out 0.72→1
+  const alpha = t < 0.12 ? t / 0.12
+              : t < 0.72 ? 1
+              : 1 - (t - 0.72) / 0.28;
+
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+
+  ctx.save();
+
+  // Dark background
+  ctx.globalAlpha = alpha * 0.82;
+  ctx.fillStyle = '#000008';
+  ctx.fillRect(0, 0, W, H);
+
+  // Horizontal scanlines
+  ctx.globalAlpha = alpha * 0.18;
+  ctx.strokeStyle = '#ff1155';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < H; y += 18) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Warning badge
+  ctx.globalAlpha = alpha * 0.55;
+  ctx.fillStyle = '#ff1155';
+  ctx.font = `bold ${Math.max(11, H * 0.07)}px monospace`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('⚠  B O S S  ⚠', cx, cy - H * 0.22);
+
+  // Subtitle
+  ctx.globalAlpha = alpha * 0.45;
+  ctx.fillStyle = '#882233';
+  ctx.font = `${Math.max(9, H * 0.05)}px monospace`;
+  ctx.fillText(`── ${bossIntro.subtitle} ──`, cx, cy - H * 0.13);
+
+  // Boss name — scale-pop effect in first 30%
+  const nameScale = t < 0.30 ? 0.55 + 0.45 * Math.min(1, t / 0.22) : 1.0;
+  const pulse = 0.92 + 0.08 * Math.sin(now / 180);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx, cy);
+  ctx.scale(nameScale * pulse, nameScale * pulse);
+  ctx.fillStyle = '#ff4466';
+  ctx.shadowColor = '#ff1155';
+  ctx.shadowBlur = 22 + Math.sin(now / 250) * 10;
+  ctx.font = `bold ${Math.max(20, H * 0.16)}px monospace`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(bossIntro.name, 0, 0);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+
+  // HP bar (appears after 20% progress)
+  if (bossIntro.maxHp > 0 && t > 0.20) {
+    const barAlpha = Math.min(1, (t - 0.20) / 0.12);
+    const barW = Math.min(W * 0.55, 300);
+    const barH2 = 7;
+    const barX = cx - barW / 2;
+    const barY = cy + H * 0.12;
+    ctx.globalAlpha = alpha * barAlpha;
+    ctx.fillStyle = '#1a0008';
+    ctx.fillRect(barX - 1, barY - 1, barW + 2, barH2 + 2);
+    // fill grows from left as intro progresses
+    const fillFrac = Math.min(1, (t - 0.20) / 0.35);
+    ctx.fillStyle = '#ff1155';
+    ctx.fillRect(barX, barY, barW * fillFrac, barH2);
+    ctx.strokeStyle = '#ff4466'; ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barW, barH2);
+    ctx.fillStyle = '#ff7799';
+    ctx.font = `${Math.max(9, H * 0.048)}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText(`HP  ${bossIntro.maxHp}`, cx, barY + barH2 + 7);
+  }
+
+  // Bottom divider line
+  ctx.globalAlpha = alpha * 0.35;
+  ctx.strokeStyle = '#ff1155'; ctx.lineWidth = 1;
+  const lineY = cy + H * 0.30;
+  ctx.beginPath(); ctx.moveTo(cx - W * 0.3, lineY); ctx.lineTo(cx + W * 0.3, lineY); ctx.stroke();
+
+  ctx.restore();
+}
+
 // ── Effects ───────────────────────────────────────────────────────────────────
 
 let effects      = [];   // { px, py, color, t0, dur, type:'flash'|'ring' }
@@ -155,7 +271,15 @@ function updateEffects(prev, next, now) {
         _addFlash(r.mx, r.my, '#ffe844', 400);
         _addRing(r.mx, r.my, '#44ff88', 550);
         _addFloat('反制！', r.mx, r.my - 0.6, '#ffe844', true);
-        if (winStreak >= 3) _addFloat(`${winStreak}連擊!!`, r.px, r.py - 1.2, '#ff9900', true);
+        // Slash impact lines at monster position
+        effects.push({ px:r.mx, py:r.my, color:'#ffffff', t0:now, dur:220, type:'slash',
+          angle: Math.atan2(r.my - r.py, r.mx - r.px) });
+        if (winStreak >= 2) {
+          const sc = winStreak >= 6 ? '#ff3300' : winStreak >= 4 ? '#ff5500' : '#ffaa00';
+          effects.push({ color:sc, t0:now, dur: 500 + winStreak * 40, type:'edgeglow',
+            strength: Math.min(0.85, 0.20 + winStreak * 0.10) });
+          _addFloat(`${winStreak}連擊!!`, r.px, r.py - 1.2, sc, true);
+        }
       } else if (r.result === 'clash') {
         winStreak = 0;
         _addFlash(r.mx, r.my, '#ff9944', 350);
@@ -173,6 +297,14 @@ function updateEffects(prev, next, now) {
   }
 
   // HP-change damage numbers + monster death burst
+  // New monster appeared (e.g. from split) — ring pop
+  for (const m of (next.monsters||[])) {
+    if (m.hp > 0 && !prev.monsters?.find(x => x.id === m.id)) {
+      const col = (MONSTER_VIS[m.monsterType]||MONSTER_VIS.basic).color;
+      _addRing(m.x, m.y, col, 450);
+    }
+  }
+
   for (const m of (next.monsters||[])) {
     const pm = prev.monsters?.find(x=>x.id===m.id);
     if (!pm) continue;
@@ -198,6 +330,9 @@ function updateEffects(prev, next, now) {
       _addFloat(`-${dmgTaken}`, dp.x, dp.y - 0.4, '#ffbb55');
       if (dmgTaken >= 15) _addRing(p.x, p.y, '#ff2200', 600);
       playerHurtAt.set(id, now);
+      const nParts = dmgTaken >= 20 ? 12 : dmgTaken >= 10 ? 8 : 5;
+      effects.push({ px:dp.x, py:dp.y, color:'#cc2200', t0:now, dur:420, type:'splat',
+        angles: Array.from({length:nParts}, (_,i) => (i/nParts)*Math.PI*2 + (Math.random()-0.5)*0.5) });
       if (dmgTaken >= 10 && !screenShake)
         screenShake = { startAt: now, until: now + 360, strength: Math.min(7, dmgTaken * 0.28) };
     }
@@ -254,10 +389,52 @@ function drawEffects(ctx, ts, now, ox, oy) {
       ctx.globalAlpha = Math.max(0, (1 - t * 2.2) * 0.75);
       ctx.beginPath(); ctx.arc(bx, by, ts * 0.48, 0, Math.PI*2);
       ctx.fillStyle = '#ffffff'; ctx.fill();
+    } else if (e.type === 'beatpulse') {
+      // Subtle full-canvas colour flash on each beat
+      const cv = ctx.canvas;
+      ctx.globalAlpha = Math.max(0, (1 - t * t) * 0.11);
+      ctx.fillStyle = e.color;
+      ctx.fillRect(0, 0, cv.width, cv.height);
+    } else if (e.type === 'edgeglow') {
+      // Screen-edge glow for combo streaks
+      const cv = ctx.canvas;
+      const alpha = Math.max(0, (1 - t) * (1 - t) * (e.strength || 0.4));
+      const grad = ctx.createRadialGradient(cv.width/2, cv.height/2, cv.height*0.10,
+                                             cv.width/2, cv.height/2, cv.height*0.88);
+      grad.addColorStop(0, 'transparent');
+      grad.addColorStop(1, e.color);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, cv.width, cv.height);
     } else {
       const cx = (e.px - (ox||0)) * ts + ts/2;
       const cy = (e.py - (oy||0)) * ts + ts/2;
-      if (e.type === 'flash') {
+      if (e.type === 'slash') {
+        // Diagonal slash lines radiating from impact point
+        const ang = e.angle || 0;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 3; i++) {
+          const a = ang + (i - 1) * 0.42;
+          const len = ts * (0.35 + (1 - t) * 0.65);
+          ctx.globalAlpha = Math.max(0, 1 - t * 1.8);
+          ctx.strokeStyle = e.color;
+          ctx.lineWidth = Math.max(1, ts * 0.07 * (1 - t));
+          ctx.beginPath();
+          ctx.moveTo(cx - Math.cos(a) * len * 0.15, cy - Math.sin(a) * len * 0.15);
+          ctx.lineTo(cx + Math.cos(a) * len, cy + Math.sin(a) * len);
+          ctx.stroke();
+        }
+      } else if (e.type === 'splat') {
+        // Blood particle splat outward from player
+        for (const a of (e.angles || [])) {
+          const d2 = ts * (0.18 + t * 0.82);
+          const r2 = Math.max(0.5, ts * 0.072 * (1 - t));
+          ctx.globalAlpha = Math.max(0, (1 - t) * 0.88);
+          ctx.beginPath();
+          ctx.arc(cx + Math.cos(a) * d2, cy + Math.sin(a) * d2, r2, 0, Math.PI * 2);
+          ctx.fillStyle = e.color; ctx.fill();
+        }
+      } else if (e.type === 'flash') {
         const a = Math.max(0, 1 - t);
         const r = ts * (0.25 + t * 0.5);
         ctx.globalAlpha = a * 0.75;
@@ -380,11 +557,11 @@ function drawQTE(canvas, state, now) {
   const myPlayer = state.players?.[gameId];
   if (!myPlayer || myPlayer.hp <= 0) return;
 
-  // Show QTE for d<=2 — monsters at d=2 move adjacent and attack in the SAME beat
+  // Show QTE only when monster is adjacent (d=1): server already resolves movement before sending state
   const adjacent = (state.monsters || []).filter(m => {
     if (m.hp <= 0 || !m.stance) return false;
     const d = Math.abs(m.x - myPlayer.x) + Math.abs(m.y - myPlayer.y);
-    return d <= 2 && m.stance !== '移' && m.stance !== '休' && m.stance !== '全彈' && m.stance !== '閃';
+    return d <= 1 && m.stance !== '移' && m.stance !== '休' && m.stance !== '全彈' && m.stance !== '閃';
   });
   if (!adjacent.length) return;
   // Sort by distance so the closest (most urgent) monster is shown first
@@ -420,20 +597,20 @@ function drawQTE(canvas, state, now) {
 
   ctx.save();
 
-  // Dark background behind entire QTE widget for readability
-  ctx.fillStyle = 'rgba(0,0,4,0.72)';
+  // Dark background — reduced opacity so it doesn't completely block the view
+  ctx.fillStyle = 'rgba(0,0,4,0.52)';
   ctx.beginPath();
-  const bgPad = 6, bgX = barLeft - bgPad, bgY = hY - 10;
-  const bgW = BAR_W + bgPad*2, bgH = bBot + 8 - bgY;
-  ctx.roundRect ? ctx.roundRect(bgX, bgY, bgW, bgH, 5) : ctx.rect(bgX, bgY, bgW, bgH);
+  const bgPad = 5, bgX = barLeft - bgPad, bgY = hY - 8;
+  const bgW = BAR_W + bgPad*2, bgH = bBot + 6 - bgY;
+  ctx.roundRect ? ctx.roundRect(bgX, bgY, bgW, bgH, 4) : ctx.rect(bgX, bgY, bgW, bgH);
   ctx.fill();
 
-  // ── 1. Hint: 【stance】▶【counter】 ────────────────────────────────────────
+  // ── 1. Hint: 【stance】▶【counter】 — smaller to reduce obstruction ──────────
   const m = adjacent[0];
   const si = STANCE_INFO[m.stance] || {};
   const counter = (si.counter === '遠程' || !si.counter) ? '攻！' : si.counter;
   const ai = ACTION_INFO[counter];
-  const hfs = Math.max(8, BAR_W * 0.1);
+  const hfs = Math.max(7, BAR_W * 0.085);  // slightly smaller font
 
   ctx.textBaseline = 'middle';
   const stStr = `【${m.stance}】`, ctStr = `【${counter}】`;
@@ -499,7 +676,25 @@ function drawQTE(canvas, state, now) {
   ctx.strokeRect(barLeft, bTop, BAR_W, BAR_H);
 
   // ── 3. Moving cursor — ▼ triangle sitting on TOP edge of bar ───────────────
-  const currentBeatMs = latestState?.beatMs || BEAT_MS;
+  const currentBeatMs = _currentBeatMs || latestState?.beatMs || BEAT_MS;
+
+  // Beat-speed label: ⚡快 / ⏱慢, shown left of bar
+  {
+    const baseBeatMs = latestState?.beatMs || BEAT_MS;
+    const ratio = currentBeatMs / baseBeatMs;
+    const speedLabel = ratio < 0.80 ? '⚡快' : ratio > 1.20 ? '⏱慢' : null;
+    if (speedLabel) {
+      const slCol = ratio < 0.80 ? '#ffaa22' : '#88bbff';
+      ctx.save();
+      ctx.font = `bold ${Math.max(8, hfs * 0.85)}px monospace`;
+      ctx.fillStyle = slCol; ctx.textAlign = 'right';
+      ctx.shadowColor = slCol; ctx.shadowBlur = 5;
+      ctx.fillText(speedLabel, barLeft - 6, bTop + BAR_H / 2);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+  }
+
   const t  = Math.min(0.999, Math.max(0, (now - beatFlash) / currentBeatMs));
   const cx = barLeft + t * BAR_W;
 
@@ -621,7 +816,7 @@ function initGame(socket, role, playerId, playerCount) {
   pendingDx=0; pendingDy=0; pendingAct=null;
   pendingDir={dx:0,dy:0}; pendingTargetId=null; hoverMonsterId=null;
   mapOverlayActive=false;
-  lastCombatResultTs=0;
+  lastCombatResultTs=0; _currentBeatMs=BEAT_MS; bossIntro=null;
 
   buildGameScreen(role);
   buildActionPad(socket, role);
@@ -629,6 +824,8 @@ function initGame(socket, role, playerId, playerCount) {
   if (role==='scholar'||isSolo) {
     buildScholarUI();
     document.getElementById('scholar-panel').style.display='flex';
+    document.getElementById('g-alerts').style.display='block';
+    document.getElementById('g-monsters').style.display='block';
   }
 
   if (role==='scout'||isSolo) {
@@ -659,20 +856,35 @@ function initGame(socket, role, playerId, playerCount) {
 
 // Listen for beat events from server
 function onBeat(socket) {
-  socket.on('beat', ({ beat }) => {
+  socket.on('beat', ({ beat, beatMs }) => {
     lastBeat  = beat;
     beatFlash = performance.now();
+    if (beatMs) _currentBeatMs = beatMs;
     updateBeatUI(beat, socket);
+    // Beat-sync pulse — only on fast (runner/evader) or slow (brute) beats; skip normal
+    if (latestState?.inCombat) {
+      const base = latestState?.beatMs || BEAT_MS;
+      const ratio = _currentBeatMs / base;
+      if (ratio < 0.80)
+        effects.push({ color:'#ff8800', t0:performance.now(), dur:160, type:'beatpulse' });
+      else if (ratio > 1.20)
+        effects.push({ color:'#5588ff', t0:performance.now(), dur:220, type:'beatpulse' });
+    }
   });
 }
 
 function stopGame() {
   if (animId) cancelAnimationFrame(animId);
-  animId=null; latestState=null;
+  animId=null; latestState=null; bossIntro=null;
   pendingDir={dx:0,dy:0}; pendingTargetId=null;
   const c=document.getElementById('game-canvas');
   if(c) c.style.transform='';
   screenShake=null;
+  // Reset caches so next session starts clean
+  _gameCanvas=null; _gridOC=null; _gridOCKey='';
+  Object.assign(_hud, {timerS:-1,inCombat:null,level:-1,levelType:null,playersHtml:'',msgsHtml:'',specialsHtml:''});
+  Object.assign(_schol, {alertsHtml:'',monstersHtml:''});
+  Object.keys(_hudEl).forEach(k=>delete _hudEl[k]);
 }
 
 // ── Level banner ──────────────────────────────────────────────────────────────
@@ -704,21 +916,19 @@ function buildGameScreen(role) {
         ${Array.from({length:BEATS_PER_TURN},(_,i)=>`<span class="beat-dot" id="bd-${i+1}"></span>`).join('')}
       </div>
       <div id="g-players"></div>
+      <div id="g-specials-hud"></div>
       <div id="g-timer">--:--</div>
     </div>
     <div id="g-body">
       <div id="g-main">
         <canvas id="game-canvas"></canvas>
         <div id="scholar-panel" style="display:none"></div>
-      </div>
-      <div id="g-sidebar">
-        <div id="g-messages"></div>
-        <div id="g-alerts" style="display:none"></div>
-        <div id="g-monsters" style="display:none"></div>
-        <div id="g-specials"></div>
-        <div id="g-action-pad"></div>
-        <div id="g-quick"></div>
-        <div id="g-help"></div>
+        <div id="g-info-overlay">
+          <div id="g-alerts" style="display:none"></div>
+          <div id="g-monsters" style="display:none"></div>
+        </div>
+        <div id="g-msg-overlay"><div id="g-messages"></div></div>
+        <div id="g-action-overlay"><div id="g-action-pad"></div></div>
       </div>
     </div>
   `;
@@ -734,35 +944,13 @@ function buildActionPad(socket, role) {
   const el = document.getElementById('g-action-pad');
   if (!el) return;
 
-  const dmgNote = role==='fighter'||isSolo ? '18傷' : role==='scout'?'10傷':role==='architect'?'12傷':'8傷';
-  const actionButtons = `
-    <div class="pad-label">動作 (J K L / 1 2 3)${role!=='fighter'&&!isSolo?' <span style="color:#555;font-size:8px">'+dmgNote+'</span>':''}</div>
-    <div class="action-row">
-      <button class="act-btn" id="act-刺" onclick="window._setAct('刺')">刺<br><small>[J] 克黃</small></button>
-      <button class="act-btn" id="act-斬" onclick="window._setAct('斬')">斬<br><small>[K] 克蒼</small></button>
-      <button class="act-btn" id="act-架" onclick="window._setAct('架')">架<br><small>[L] 克赤</small></button>
-      <button class="act-btn act-none" id="act-null" onclick="window._setAct(null)">無<br><small>[0] 移動</small></button>
-    </div>`;
-
   el.innerHTML=`
-    <div class="pad-section">
-      <div class="pad-header">
-        <span class="pad-label">移動 (WASD)</span>
-        <span id="pending-dir-badge" class="pad-label" style="color:#1D9E75">·</span>
-      </div>
-      <div class="dir-pad">
-        <div></div>
-        <button class="dir-btn" onclick="window._setDir(0,-1)">↑</button>
-        <div></div>
-        <button class="dir-btn" onclick="window._setDir(-1,0)">←</button>
-        <button class="dir-btn dir-stay" onclick="window._setDir(0,0)">·</button>
-        <button class="dir-btn" onclick="window._setDir(1,0)">→</button>
-        <div></div>
-        <button class="dir-btn" onclick="window._setDir(0,1)">↓</button>
-        <div></div>
-      </div>
-      ${actionButtons}
-      <div id="pad-preview" class="pad-preview">等待下一拍…</div>
+    <div class="act-overlay-row">
+      <span id="pending-dir-badge" class="dir-badge">·</span>
+      <button class="act-btn" id="act-刺" onclick="window._setAct('刺')">刺<br><small>J</small></button>
+      <button class="act-btn" id="act-斬" onclick="window._setAct('斬')">斬<br><small>K</small></button>
+      <button class="act-btn" id="act-架" onclick="window._setAct('架')">架<br><small>L</small></button>
+      <button class="act-btn act-none" id="act-null" onclick="window._setAct(null)">無<br><small>0</small></button>
     </div>
   `;
 
@@ -822,29 +1010,6 @@ function _submitAndRefresh(socket) {
 }
 
 function updatePadUI() {
-  // Highlight selected direction
-  const dirs = [
-    [0,-1,'↑'],[0,1,'↓'],[-1,0,'←'],[1,0,'→'],[0,0,'·']
-  ];
-  for (const btn of document.querySelectorAll('.dir-btn')) {
-    btn.classList.remove('selected');
-  }
-  const allBtns = document.querySelectorAll('.dir-btn');
-  // Simple: re-build isn't needed, just update preview
-  const actLabel = pendingAct ? ACTION_INFO[pendingAct].label : '無';
-  const dirLabel = pendingDx===0&&pendingDy===0 ? '待機' :
-    pendingDx>0?'→':pendingDx<0?'←':pendingDy>0?'↓':'↑';
-  const preview = document.getElementById('pad-preview');
-  if (preview) {
-    if (!latestState?.inCombat) {
-      preview.innerHTML = '🚶 自由移動中';
-    } else {
-      const actColor = pendingAct ? ACTION_INFO[pendingAct].color : '#555';
-      preview.innerHTML=`移動：<b>${dirLabel}</b> ／ 動作：<b style="color:${actColor}">${actLabel}</b>`;
-    }
-  }
-
-  // Highlight action button
   for (const k of ['刺','斬','架',null]) {
     const btn=document.getElementById('act-'+(k||'null'));
     if(btn) btn.classList.toggle('selected', k===pendingAct);
@@ -880,7 +1045,7 @@ function updateBeatUI(beat, socket) {
 
 function _recordQtePress() {
   if (!latestState?.inCombat) return;
-  qtePressT   = Math.min(0.999, Math.max(0, (performance.now() - beatFlash) / (latestState?.beatMs || BEAT_MS)));
+  qtePressT   = Math.min(0.999, Math.max(0, (performance.now() - beatFlash) / (_currentBeatMs || latestState?.beatMs || BEAT_MS)));
   qteResultAt = performance.now();
 }
 
@@ -900,32 +1065,29 @@ function buildScholarUI() {
   `;
 }
 
+const _schol = { alertsHtml:'', monstersHtml:'' };
 function renderScholar(state) {
-  const alertEl=document.getElementById('g-alerts');
-  if(state.alerts?.length){
-    alertEl.innerHTML=`<div class="panel-label">⚡ 即時警告</div>`+
-      state.alerts.map(a=>`<div class="scholar-alert">${a}</div>`).join('');
-  } else {
-    alertEl.innerHTML=`<div class="panel-label">⚡ 即時警告</div><div class="scholar-quiet">平靜中…</div>`;
+  const alertsHtml=state.alerts?.length
+    ?`<div class="panel-label">⚡ 即時警告</div>`+state.alerts.map(a=>`<div class="scholar-alert">${a}</div>`).join('')
+    :`<div class="panel-label">⚡ 即時警告</div><div class="scholar-quiet">平靜中…</div>`;
+  if(alertsHtml!==_schol.alertsHtml){
+    _schol.alertsHtml=alertsHtml;
+    const alertEl=document.getElementById('g-alerts');
+    if(alertEl) alertEl.innerHTML=alertsHtml;
   }
 
-  const monEl=document.getElementById('g-monsters');
   const monList=state.allMonsters||state.monsters||[];
-  if(monList.length&&monEl){
-    monEl.innerHTML=`<div class="panel-label">怪物狀態</div>`+
-      monList.map(m=>{
-        const pct=m.maxHp?Math.round(100*m.hp/m.maxHp):0;
-        const vis=MONSTER_VIS[m.monsterType]||MONSTER_VIS.basic;
-        const si=STANCE_INFO[m.stance]||{label:'?',color:'#888',counter:'?'};
-        const stanceHtml=m.stance&&m.stance!=='移'
-          ?`<span class="stance-tag" style="background:${si.color}20;color:${si.color};border-color:${si.color}">${si.label} →${si.counter}</span>`:'';
-        return `<div class="mon-row${m.hp<=0?' mon-dead':''}">
-          <span class="mon-label" style="color:${vis.color}">${m.label}</span>
-          ${stanceHtml}
-          <div class="mon-hp-bar"><div style="width:${pct}%"></div></div>
-          ${m.hp>0?`<button class="mark-btn" onclick="window._markMonster(${m.id})">標記</button>`:'<span class="mon-dead-txt">擊倒</span>'}
-        </div>`;
-      }).join('');
+  const monstersHtml=monList.length?`<div class="panel-label">怪物狀態</div>`+monList.map(m=>{
+    const pct=m.maxHp?Math.round(100*m.hp/m.maxHp):0;
+    const vis=MONSTER_VIS[m.monsterType]||MONSTER_VIS.basic;
+    const si=STANCE_INFO[m.stance]||{label:'?',color:'#888',counter:'?'};
+    const stanceHtml=m.stance&&m.stance!=='移'?`<span class="stance-tag" style="background:${si.color}20;color:${si.color};border-color:${si.color}">${si.label} →${si.counter}</span>`:'';
+    return `<div class="mon-row${m.hp<=0?' mon-dead':''}"><span class="mon-label" style="color:${vis.color}">${m.label}</span>${stanceHtml}<div class="mon-hp-bar"><div style="width:${pct}%"></div></div>${m.hp>0?`<button class="mark-btn" onclick="window._markMonster(${m.id})">標記</button>`:'<span class="mon-dead-txt">擊倒</span>'}</div>`;
+  }).join(''):'';
+  if(monstersHtml!==_schol.monstersHtml){
+    _schol.monstersHtml=monstersHtml;
+    const monEl=document.getElementById('g-monsters');
+    if(monEl&&monstersHtml) monEl.innerHTML=monstersHtml;
   }
 
   const radar=document.getElementById('scholar-radar');
@@ -981,19 +1143,30 @@ function fitCanvas(canvas,W,H){
 
 // ── Tile / entity rendering ───────────────────────────────────────────────────
 
+// Offscreen canvas cache — grid content is static within a level
+let _gridOC = null, _gridOCKey = '';
 function drawGrid(ctx,grid,W,H,ts){
-  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
-    const t=grid[y][x];
-    ctx.fillStyle=TILE_COLORS[t]||'#0c0c14'; ctx.fillRect(x*ts,y*ts,ts,ts);
-    if(t===TILE.WALL){ctx.fillStyle='rgba(255,255,255,0.04)';ctx.fillRect(x*ts,y*ts,ts,1);}
-    if(t===TILE.EXIT){
-      ctx.fillStyle='rgba(29,158,117,0.25)'; ctx.fillRect(x*ts,y*ts,ts,ts);
-      ctx.fillStyle='#1D9E75';
-      ctx.font=`bold ${Math.max(8,ts*0.5)}px monospace`;
-      ctx.textAlign='center';ctx.textBaseline='middle';
-      ctx.fillText('出',x*ts+ts/2,y*ts+ts/2);ctx.textBaseline='alphabetic';
+  const ls = latestState;
+  const key = `${ls?.level||0}_${W}_${H}_${ts}_${ls?.viewX||0}_${ls?.viewY||0}`;
+  if (key !== _gridOCKey) {
+    _gridOC = document.createElement('canvas');
+    _gridOC.width = W*ts; _gridOC.height = H*ts;
+    const oc = _gridOC.getContext('2d');
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+      const t=grid[y][x];
+      oc.fillStyle=TILE_COLORS[t]||'#0c0c14'; oc.fillRect(x*ts,y*ts,ts,ts);
+      if(t===TILE.WALL){oc.fillStyle='rgba(255,255,255,0.04)';oc.fillRect(x*ts,y*ts,ts,1);}
+      if(t===TILE.EXIT){
+        oc.fillStyle='rgba(29,158,117,0.25)'; oc.fillRect(x*ts,y*ts,ts,ts);
+        oc.fillStyle='#1D9E75';
+        oc.font=`bold ${Math.max(8,ts*0.5)}px monospace`;
+        oc.textAlign='center';oc.textBaseline='middle';
+        oc.fillText('出',x*ts+ts/2,y*ts+ts/2);oc.textBaseline='alphabetic';
+      }
     }
+    _gridOCKey = key;
   }
+  ctx.drawImage(_gridOC, 0, 0);
 }
 
 function drawTrap(ctx,t,ts,showType){
@@ -1051,6 +1224,10 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   const r   = ts*vis.size;
   const si  = STANCE_INFO[m.stance];
 
+  // Distance to nearest player — used to gate "attack imminent" indicators
+  const _nearestD = Object.values(latestState?.players || {})
+    .reduce((min, p) => Math.min(min, Math.abs(m.x-p.x)+Math.abs(m.y-p.y)), 99);
+
   // Beat-synced squash & stretch
   const beatAge = now - beatFlash;
   let scaleX=1, scaleY=1;
@@ -1083,7 +1260,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   ctx.translate(cx, cy);
   ctx.scale(scaleX, scaleY);
 
-  if (si && m.stance!=='移') {
+  if (si && m.stance!=='移' && _nearestD <= 1) {
     const pulse=0.5+0.5*Math.sin(now/140);
     ctx.beginPath(); ctx.arc(0,0,r+5+pulse*3,0,Math.PI*2);
     ctx.strokeStyle=`${si.color}cc`; ctx.lineWidth=2.5; ctx.stroke();
@@ -1115,7 +1292,7 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
   ctx.fillRect(bx,by,barW*pct,barH);
 
   // ── Stance label (large) ─────────────────────────────────────────────────────
-  if (si && m.stance !== '移' && m.stance !== '休') {
+  if (si && m.stance !== '移' && m.stance !== '休' && _nearestD <= 1) {
     const pulse = 0.6 + 0.4 * Math.sin(now / 160);
     ctx.save();
     ctx.fillStyle = si.color;
@@ -1132,6 +1309,109 @@ function drawMonster(ctx, m, ts, ox, oy, now) {
     ctx.save(); ctx.globalAlpha = 0.55 + pulse * 0.3;
     ctx.beginPath(); ctx.arc(cx, cy, r + 6 + pulse * 3, 0, Math.PI * 2);
     ctx.strokeStyle = '#ff4400'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Target highlight: monster with active stance within attack range ──────────
+  // Draws corner brackets around the tile to signal "this one is coming for you"
+  {
+    const _myP = latestState?.players?.[gameId];
+    if (_myP && m.stance && m.stance !== '移' && m.stance !== '休' && m.stance !== '全彈') {
+      const _d = Math.abs(m.x - _myP.x) + Math.abs(m.y - _myP.y);
+      if (_d <= 2) {
+        const blink = 0.55 + 0.45 * Math.sin(now / 90);
+        const tileX = (m.x - (ox||0)) * ts;
+        const tileY = (m.y - (oy||0)) * ts;
+        const arm = Math.max(4, ts * 0.28);
+        const gap = 2;
+        ctx.save();
+        ctx.globalAlpha = blink * 0.85;
+        ctx.strokeStyle = si ? si.color : '#ff4444';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'square';
+        // Top-left corner
+        ctx.beginPath(); ctx.moveTo(tileX+gap, tileY+gap+arm); ctx.lineTo(tileX+gap, tileY+gap); ctx.lineTo(tileX+gap+arm, tileY+gap); ctx.stroke();
+        // Top-right corner
+        ctx.beginPath(); ctx.moveTo(tileX+ts-gap-arm, tileY+gap); ctx.lineTo(tileX+ts-gap, tileY+gap); ctx.lineTo(tileX+ts-gap, tileY+gap+arm); ctx.stroke();
+        // Bottom-left corner
+        ctx.beginPath(); ctx.moveTo(tileX+gap, tileY+ts-gap-arm); ctx.lineTo(tileX+gap, tileY+ts-gap); ctx.lineTo(tileX+gap+arm, tileY+ts-gap); ctx.stroke();
+        // Bottom-right corner
+        ctx.beginPath(); ctx.moveTo(tileX+ts-gap-arm, tileY+ts-gap); ctx.lineTo(tileX+ts-gap, tileY+ts-gap); ctx.lineTo(tileX+ts-gap, tileY+ts-gap-arm); ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
+  // ── Speed lines: fast attackers (runner / evader) telegraphing 赤 ────────────
+  // Only show when close enough to actually rush-attack this beat (rushers cover 2 tiles → d≤3)
+  if ((m.monsterType === 'runner' || m.monsterType === 'evader') && m.stance === '赤' && _nearestD <= 3) {
+    const beatAge3 = now - beatFlash;
+    const beatDur  = _currentBeatMs || BEAT_MS;
+    const t3 = Math.min(1, beatAge3 / (beatDur * 0.85));
+    ctx.save();
+    ctx.strokeStyle = vis.color; ctx.lineCap = 'round';
+    for (let i = 0; i < 6; i++) {
+      const ang2 = (i / 6) * Math.PI * 2;
+      const inner = r + 3;
+      const outer = inner + ts * (0.22 + (1 - t3) * 0.38);
+      ctx.globalAlpha = Math.max(0, (1 - t3) * 0.55);
+      ctx.lineWidth = Math.max(0.5, ts * 0.045 * (1 - t3));
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang2) * inner, cy + Math.sin(ang2) * inner);
+      ctx.lineTo(cx + Math.cos(ang2) * outer, cy + Math.sin(ang2) * outer);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ── Charge ring: brute telegraphing 黃 heavy attack (only when adjacent/closing) ──
+  if (m.monsterType === 'brute' && m.stance === '黃' && _nearestD <= 2) {
+    const beatAge3 = now - beatFlash;
+    const beatDur  = _currentBeatMs || BEAT_MS;
+    const t3 = Math.min(1, beatAge3 / beatDur);
+    ctx.save();
+    // Outer expanding dashed ring
+    const ringR = ts * (0.52 + t3 * 1.15);
+    ctx.globalAlpha = Math.max(0, (1 - t3) * 0.68);
+    ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+    ctx.strokeStyle = '#5566ff'; ctx.lineWidth = 2.5;
+    ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+    // Inner blue glow pulse
+    const innerPulse = 0.5 + 0.5 * Math.sin(now / 75);
+    ctx.globalAlpha = innerPulse * 0.22;
+    ctx.beginPath(); ctx.arc(cx, cy, ts * 0.58, 0, Math.PI * 2);
+    ctx.fillStyle = '#5566ff'; ctx.fill();
+    ctx.restore();
+  }
+
+  // ── Bomber fuse countdown (1-4 dots above head) ──────────────────────────────
+  if (m.monsterType === 'bomber' && m.fuseBeats != null) {
+    const fuse = m.fuseBeats;
+    const dotR = Math.max(3, ts * 0.09);
+    const dotY = by - barH - 8;
+    const spacing = dotR * 2.6;
+    const startX = cx - (4 * spacing) / 2 + spacing / 2;
+    for (let i = 0; i < 4; i++) {
+      const active = i < fuse;
+      const pulse = active && fuse <= 2 ? 0.55 + 0.45 * Math.sin(now / (60 + fuse * 40)) : 1;
+      ctx.save();
+      ctx.globalAlpha = active ? pulse : 0.18;
+      ctx.beginPath();
+      ctx.arc(startX + i * spacing, dotY, active && fuse <= 1 ? dotR * 1.4 : dotR, 0, Math.PI * 2);
+      ctx.fillStyle = fuse <= 1 ? '#ff2200' : fuse <= 2 ? '#ff8800' : '#ffcc00';
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // ── Guardian shield glow ──────────────────────────────────────────────────
+  if (m.monsterType === 'guardian') {
+    const pulse2 = 0.5 + 0.5 * Math.sin(now / 220);
+    ctx.save();
+    ctx.globalAlpha = 0.22 + pulse2 * 0.18;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 8 + pulse2 * 4, 0, Math.PI * 2);
+    ctx.strokeStyle = '#4455ee'; ctx.lineWidth = 3;
+    ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
     ctx.restore();
   }
 
@@ -1471,15 +1751,16 @@ function drawMapOverlay(ctx, canvas, state, now) {
 }
 
 function buildScoutMapUI() {
-  const specials=document.getElementById('g-specials');
-  if(!specials) return;
+  const overlay=document.getElementById('g-action-overlay');
+  if(!overlay) return;
   const wrap=document.createElement('div');
-  wrap.innerHTML=`<button id="map-btn" class="cd-bar"
+  wrap.innerHTML=`<button id="map-btn" class="hud-pill"
+    style="cursor:pointer"
     onmousedown="mapOverlayActive=true" onmouseup="mapOverlayActive=false"
     ontouchstart="mapOverlayActive=true" ontouchend="mapOverlayActive=false">
-    🗺 按住看全圖 (M)
+    🗺 按住全圖 (M)
   </button>`;
-  specials.parentElement.insertBefore(wrap,specials);
+  overlay.insertBefore(wrap, overlay.firstChild);
 }
 
 function renderSolo(canvas, state, now) {
@@ -1526,70 +1807,70 @@ function renderSolo(canvas, state, now) {
 const LEVEL_TYPE_COLOR = { boss:'#ff2244', rest:'#44cc88', puzzle:'#7F77DD', normal:'#1D9E75' };
 const LEVEL_TYPE_LABEL = { boss:'⚡BOSS', rest:'🛌休息', puzzle:'🧩謎題', normal:'' };
 
+// HUD diff cache — only update DOM when content actually changes
+const _hud = { timerS:-1, inCombat:null, level:-1, levelType:null, playersHtml:'', msgsHtml:'', specialsHtml:'' };
+// Cached DOM element refs — looked up once after game screen builds
+const _hudEl = {};
+function _hel(id){ return _hudEl[id] || (_hudEl[id]=document.getElementById(id)); }
+
 function renderHUD(state) {
-  const tEl=document.getElementById('g-timer');
-  if(tEl&&state.timeLeft!==undefined){
-    const s=Math.ceil(state.timeLeft/1000);
-    tEl.textContent=`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
-    tEl.style.color=s<=30?'#D85A30':'#aaa';
+  const s=Math.ceil((state.timeLeft||0)/1000);
+  if(s!==_hud.timerS){
+    _hud.timerS=s;
+    const el=_hel('g-timer');
+    if(el){el.textContent=`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;el.style.color=s<=30?'#D85A30':'#aaa';}
   }
 
-  const modeEl=document.getElementById('g-mode-badge');
-  if(modeEl){
-    if(state.inCombat){ modeEl.textContent='⚔戰鬥'; modeEl.style.color='#D85A30'; }
-    else              { modeEl.textContent='🚶自由'; modeEl.style.color='#555577'; }
+  if(state.inCombat!==_hud.inCombat){
+    _hud.inCombat=state.inCombat;
+    const el=_hel('g-mode-badge');
+    if(el){if(state.inCombat){el.textContent='⚔戰鬥';el.style.color='#D85A30';}else{el.textContent='🚶自由';el.style.color='#555577';}}
   }
 
-  const lvEl=document.getElementById('g-level-badge');
-  if(lvEl&&state.level){
-    const tl=LEVEL_TYPE_LABEL[state.levelType]||'';
-    lvEl.textContent=`Lv.${state.level}${tl?' '+tl:''}`;
-    lvEl.style.color=LEVEL_TYPE_COLOR[state.levelType]||'#1D9E75';
+  if(state.level!==_hud.level||state.levelType!==_hud.levelType){
+    _hud.level=state.level; _hud.levelType=state.levelType;
+    const el=_hel('g-level-badge');
+    if(el&&state.level){const tl=LEVEL_TYPE_LABEL[state.levelType]||'';el.textContent=`Lv.${state.level}${tl?' '+tl:''}`;el.style.color=LEVEL_TYPE_COLOR[state.levelType]||'#1D9E75';}
   }
 
-  const pEl=document.getElementById('g-players');
-  if(pEl&&state.players){
-    pEl.innerHTML=Object.values(state.players).map(p=>{
+  if(state.players){
+    const html=Object.values(state.players).map(p=>{
       const pct=p.maxHp?Math.round(100*p.hp/p.maxHp):0;
-      const color=ROLE_COLOR[p.role]||'#888'; const dead=p.hp<=0;
-      return `<div class="hud-player${dead?' dead':''}">
-        <span class="hud-pname" style="color:${color}">${p.name}</span>
-        <div class="hud-hp-bar"><div style="width:${pct}%;background:${dead?'#555':color}"></div></div>
-        <span class="hud-hp-num">${p.hp}</span>
-        ${p.atExit?'<span class="exit-badge">出口</span>':''}
-      </div>`;
+      const color=ROLE_COLOR[p.role]||'#888';const dead=p.hp<=0;
+      return `<div class="hud-player${dead?' dead':''}"><span class="hud-pname" style="color:${color}">${p.name}</span><div class="hud-hp-bar"><div style="width:${pct}%;background:${dead?'#555':color}"></div></div><span class="hud-hp-num">${p.hp}</span>${p.atExit?'<span class="exit-badge">出口</span>':''}</div>`;
     }).join('');
+    if(html!==_hud.playersHtml){_hud.playersHtml=html;const el=_hel('g-players');if(el)el.innerHTML=html;}
   }
 
-  const mEl=document.getElementById('g-messages');
-  if(mEl&&state.messages){
-    mEl.innerHTML=state.messages.map(m=>`<div class="game-msg">${m.text}</div>`).join('');
+  if(state.messages){
+    const html=state.messages.map(m=>`<div class="game-msg">${m.text}</div>`).join('');
+    if(html!==_hud.msgsHtml){_hud.msgsHtml=html;const el=_hel('g-messages');if(el)el.innerHTML=html;}
   }
 
-  const sEl=document.getElementById('g-specials');
-  if(sEl){
-    let html='';
-    if(state.specialCd>0)   html+=`<div class="cd-bar"><span>技能冷卻</span><span>${(state.specialCd/1000).toFixed(1)}s</span></div>`;
-    if(state.specialCd===0) html+=`<div class="cd-bar ready">技能就緒！</div>`;
-    if(state.pressurePlates){const done=state.pressurePlates.filter(p=>p.active).length;html+=`<div class="cd-bar${done===state.pressurePlates.length?' ready':''}">壓力板 ${done}/${state.pressurePlates.length}</div>`;}
-    if(state.bossPhase2)    html+=`<div class="cd-bar" style="color:#ff4466">⚡ BOSS 狂暴！</div>`;
-    if(state.isRestRoom)    html+=`<div class="cd-bar ready">🛌 正在恢復體力…</div>`;
-    sEl.innerHTML=html;
-  }
+  let sh='';
+  if(state.specialCd>0)   sh+=`<span class="hud-pill">技能 ${(state.specialCd/1000).toFixed(1)}s</span>`;
+  if(state.specialCd===0) sh+=`<span class="hud-pill ready">技能就緒</span>`;
+  if(state.pressurePlates){const done=state.pressurePlates.filter(p=>p.active).length;sh+=`<span class="hud-pill${done===state.pressurePlates.length?' ready':''}">${done}/${state.pressurePlates.length}板</span>`;}
+  if(state.bossPhase2)  sh+=`<span class="hud-pill warn">⚡狂暴</span>`;
+  if(state.bossPhase3)  sh+=`<span class="hud-pill warn">🔥終形態</span>`;
+  if(state.bossPhase4)  sh+=`<span class="hud-pill warn" style="color:#ff00ff">⚡絕對形態</span>`;
+  if(state.isRestRoom)  sh+=`<span class="hud-pill ready">🛌回血</span>`;
+  if(sh!==_hud.specialsHtml){_hud.specialsHtml=sh;const el=_hel('g-specials-hud');if(el)el.innerHTML=sh;}
 }
 
 // ── Render loop ───────────────────────────────────────────────────────────────
+
+let _gameCanvas = null; // cached after first frame
 
 function renderLoop(now) {
   if(!latestState){ animId=requestAnimationFrame(renderLoop); return; }
   const state=latestState;
   try {
-    const canvas=document.getElementById('game-canvas');
+    if(!_gameCanvas) _gameCanvas=document.getElementById('game-canvas');
+    const canvas=_gameCanvas;
     if(canvas) _tickShake(canvas, now);
     if(isSolo&&canvas){
       renderSolo(canvas,state,now); renderScholar(state);
-      document.getElementById('g-alerts').style.display='block';
-      document.getElementById('g-monsters').style.display='block';
     } else if(gameRole==='fighter'&&canvas) {
       renderFighter(canvas,state,now);
     } else if(canvas&&state.localGrid) {
@@ -1597,6 +1878,7 @@ function renderLoop(now) {
       if(gameRole==='scholar') renderScholar(state);
     }
     if(canvas && state.phase==='playing') drawQTE(canvas, state, now);
+    if(canvas && bossIntro) drawBossIntro(canvas.getContext('2d'), canvas, now);
     renderHUD(state);
   } catch(e){ console.error('render error',e); }
   animId=requestAnimationFrame(renderLoop);
@@ -1605,10 +1887,6 @@ function renderLoop(now) {
 // ── Input (keyboard) ──────────────────────────────────────────────────────────
 
 function setupInput(socket) {
-  const dirMap = {
-    ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0],
-    w:[0,-1],s:[0,1],a:[-1,0],d:[1,0],W:[0,-1],S:[0,1],A:[-1,0],D:[1,0],
-  };
   const actMap = { '1':'刺','2':'斬','3':'架','0':null,'j':'刺','k':'斬','l':'架','J':'刺','K':'斬','L':'架' };
 
   const STANCES=[null,'刺','斬','架'];
@@ -1683,6 +1961,11 @@ window.GAME = {
     const now = performance.now();
     updateEffects(latestState, s, now);
     syncProjectiles(s);
+    // Boss intro: trigger when entering a boss level for the first time
+    if (s.levelType === 'boss' && s.phase === 'playing' &&
+        (!latestState || latestState.levelType !== 'boss' || latestState.level !== s.level)) {
+      _triggerBossIntro(s);
+    }
     // Clear QTE + pending actions when leaving combat
     if (prevInCombat && !s.inCombat) {
       qtePressT = null; qteResultAt = null;

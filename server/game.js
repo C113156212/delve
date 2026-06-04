@@ -3,7 +3,7 @@ const { CONFIG } = require('../shared/config');
 
 const TILE = Object.freeze({ WALL: 0, FLOOR: 1, EXIT: 2, TRAP: 3 });
 
-const MAX_LEVEL     = 27;
+const MAX_LEVEL     = 36;
 const BEATS_PER_TURN = 8;   // 8-beat visual cycle; every beat resolves immediately
 const BEAT_MS       = 500;  // ms per beat → 2 beats/sec
 const COMBAT_RANGE  = 5;    // Manhattan distance to enter combat mode
@@ -26,11 +26,11 @@ function getLevelParams(level) {
   const type = getLevelType(level);
 
   if (type === 'boss') {
-    const tier = level / 9;  // 1, 2, 3
+    const tier = level / 9;  // 1, 2, 3, 4
     return { levelType:'boss', bossTier:tier, monsters:1,
-      baseHp:  [600, 900, 1200][tier-1],
-      baseDmg: [14,  20,  26  ][tier-1],
-      beatMs:  [700, 650, 600 ][tier-1],
+      baseHp:  [600, 900, 1200, 1600][tier-1],
+      baseDmg: [14,  20,  26,   32  ][tier-1],
+      beatMs:  [700, 650, 600,  550 ][tier-1],
       timer:360, trapCount:0, types:['boss'] };
   }
 
@@ -46,18 +46,21 @@ function getLevelParams(level) {
   // Normal levels — tier 0-8 across 27 levels (every 3 levels = +1 tier)
   const tier = Math.floor((level-1) / 3);
   const POOLS = [
-    ['basic'],
-    ['basic','runner'],
-    ['basic','runner','brute'],
-    ['runner','brute','evader'],
-    ['brute','archer','evader'],
-    ['brute','archer','runner','evader'],
-    ['archer','brute','evader','runner'],
-    ['archer','brute','runner','evader'],
-    ['archer','brute','runner','evader'],
+    ['basic'],                                       // tier 0  L1-3  : ch1 基礎
+    ['basic','splitter'],                            // tier 1  L4-6  : ch1 splitter 登場
+    ['basic','splitter','runner'],                   // tier 2  L7-8  : ch1 末尾 runner
+    ['runner','brute'],                              // tier 3  L10-12: ch2 快慢刀節奏
+    ['runner','brute','evader'],                     // tier 4  L13-15: ch2 evader
+    ['brute','evader','splitter'],                   // tier 5  L16-18: ch2 splitter 回歸混搭
+    ['evader','mirror','brute'],                     // tier 6  L19-21: ch3 mirror 登場
+    ['mirror','bomber','evader'],                    // tier 7  L22-24: ch3 bomber
+    ['mirror','bomber','guardian'],                  // tier 8  L25-27: ch3 guardian
+    ['bomber','guardian','summoner'],                // tier 9  L28-30: ch4 summoner 登場
+    ['guardian','summoner','mirror','brute'],        // tier 10 L31-33: ch4
+    ['summoner','mirror','bomber','guardian','evader','brute'], // tier 11 L34-36: ch4 全陣容
   ];
-  const COUNTS   = [3, 4, 5, 6, 7, 8, 9, 10, 11];
-  const BEAT_ARR = [750, 700, 650, 620, 580, 550, 520, 500, 500];
+  const COUNTS   = [3, 4, 5, 5, 6, 7, 6, 7, 8, 8, 9, 10];
+  const BEAT_ARR = [750, 720, 680, 650, 620, 580, 550, 520, 500, 480, 460, 450];
 
   const t = Math.min(tier, POOLS.length-1);
   return { levelType:'normal', monsters:COUNTS[t],
@@ -88,12 +91,19 @@ const STANCE_RESULT = {
 // ── Monster type definitions ──────────────────────────────────────────────────
 
 const MONSTER_DEFS = {
-  basic:  { symbol:'M', color:'#dd3333', bgColor:'#550a0a', hpMult:1.0,  dmgMult:1.0,  size:0.38 },  // 紅
-  runner: { symbol:'R', color:'#ff8800', bgColor:'#5a2a00', hpMult:0.75, dmgMult:0.75, size:0.30 },  // 橙
-  brute:  { symbol:'B', color:'#5566ff', bgColor:'#12184a', hpMult:1.5,  dmgMult:1.5,  size:0.46 },  // 藍
-  evader: { symbol:'E', color:'#22cc88', bgColor:'#0a3a22', hpMult:0.65, dmgMult:0.9,  size:0.32 },  // 翠綠
-  archer: { symbol:'A', color:'#ddbb22', bgColor:'#3a3000', hpMult:0.65, dmgMult:1.2,  size:0.33, range:5 },  // 金
-  boss:   { symbol:'X', color:'#ff1155', bgColor:'#440010', hpMult:1.0,  dmgMult:1.0,  size:0.55 },  // 深紅（HP/dmg直接來自getLevelParams）
+  //                                                                                       beatMult: attack speed multiplier applied to gs._baseBeatMs
+  basic:         { symbol:'M', color:'#dd3333', bgColor:'#550a0a', hpMult:1.0,  dmgMult:1.0,  size:0.38, beatMult:1.00 },  // 紅 — 標準節拍
+  runner:        { symbol:'R', color:'#ff8800', bgColor:'#5a2a00', hpMult:0.75, dmgMult:0.75, size:0.30, beatMult:0.62 },  // 橙 — 超快三連擊
+  brute:         { symbol:'B', color:'#5566ff', bgColor:'#12184a', hpMult:1.5,  dmgMult:1.5,  size:0.46, beatMult:1.45 },  // 藍 — 緩慢重拍
+  evader:        { symbol:'E', color:'#22cc88', bgColor:'#0a3a22', hpMult:0.65, dmgMult:1.1,  size:0.32, beatMult:0.68 },  // 翠綠 — 快衝
+  archer:        { symbol:'A', color:'#ddbb22', bgColor:'#3a3000', hpMult:0.65, dmgMult:1.2,  size:0.33, beatMult:1.15, range:5 },  // 金 — 從容瞄準
+  splitter:      { symbol:'S', color:'#ff44aa', bgColor:'#3a0a1e', hpMult:1.3,  dmgMult:0.9,  size:0.42, beatMult:1.10 },  // 粉紅 — 血量減半時分裂
+  splitter_mini: { symbol:'s', color:'#ff44aa', bgColor:'#3a0a1e', hpMult:0.40, dmgMult:0.65, size:0.24, beatMult:0.85 },  // 粉紅小 — 分裂後的快攻小怪
+  mirror:        { symbol:'W', color:'#aabbff', bgColor:'#0c0c22', hpMult:0.85, dmgMult:1.1,  size:0.38, beatMult:1.05 },  // 銀藍 — 學習並反制玩家動作
+  bomber:        { symbol:'C', color:'#ff6600', bgColor:'#3a1800', hpMult:0.55, dmgMult:0.8,  size:0.34, beatMult:0.72 },  // 橙紅 — 接近玩家後引爆（4拍倒數）
+  guardian:      { symbol:'G', color:'#4455ee', bgColor:'#0a0a2a', hpMult:2.0,  dmgMult:1.2,  size:0.44, beatMult:1.40 },  // 深藍大 — 鄰近友方時吸收玩家攻擊傷害
+  summoner:      { symbol:'N', color:'#aa44ff', bgColor:'#1a0a2a', hpMult:1.2,  dmgMult:0.7,  size:0.36, beatMult:1.25 },  // 紫 — 每10拍召喚一隻 basic，自身以蒼攻擊
+  boss:          { symbol:'X', color:'#ff1155', bgColor:'#440010', hpMult:1.0,  dmgMult:1.0,  size:0.55, beatMult:1.00 },  // 深紅（boss 自行管理 beatMs）
 };
 
 // ── Monster 8-beat attack patterns ────────────────────────────────────────────
@@ -104,9 +114,15 @@ const MONSTER_PATTERNS = {
   basic:   ['赤', '移', '蒼', '移', '黃', '移', '移', '休'],
   runner:  ['赤', '赤', '赤', '休', '赤', '赤', '赤', '休'],  // 3-hit combo × 2
   brute:   ['移', '移', '黃', '移', '移', '黃', '移', '黃'],  // charges 2, heavy × 3
-  evader:  ['閃', '移', '閃', '赤', '閃', '移', '閃', '赤'],  // odd=dodge, even=approach/attack
-  archer:  ['射', '移', '射', '射', '休', '射', '移', '射'],
-  boss:    [],  // boss uses BOSS_PATTERNS, not this array
+  evader:        ['赤', '移', '赤', '休', '赤', '移', '赤', '休'],  // rush in + attack, then approach
+  archer:        ['射', '移', '射', '射', '休', '射', '移', '射'],
+  splitter:      ['赤', '移', '黃', '移', '赤', '蒼', '移', '休'],  // varied attacks; splits at 50% HP
+  splitter_mini: ['赤', '移', '赤', '休', '赤', '移', '赤', '休'],  // rush-only; no split
+  mirror:        ['赤', '移', '赤', '移', '赤', '移', '赤', '休'],  // frequent attacks to enable adaptation
+  bomber:        ['赤', '移', '赤', '移', '赤', '移', '赤', '移'],  // always moving/attacking — kill before fuse runs out
+  guardian:      ['黃', '移', '黃', '移', '黃', '休', '移', '黃'],  // slow heavy attacks
+  summoner:      ['休', '休', '蒼', '休', '休', '休', '蒼', '休'],  // mostly immune; 2 weak attacks per cycle
+  boss:          [],  // boss uses BOSS_PATTERNS, not this array
 };
 
 // Per-tier boss patterns. p1=phase1, p2=phase2, p3=phase3 (boss3 only)
@@ -126,6 +142,13 @@ const BOSS_PATTERNS = {
     p1: ['赤','蒼','黃','移','赤','蒼','黃','休'],
     p2: ['赤','黃','蒼','赤','蒼','黃','赤','黃'],
     p3: ['蒼','赤','黃','蒼','赤','蒼','黃','赤'],
+  },
+  // Boss 4 "虛空之主" — 4 phases, ultimate challenge
+  4: {
+    p1: ['赤','蒼','黃','移','赤','蒼','黃','休'],
+    p2: ['蒼','赤','黃','蒼','赤','黃','移','蒼'],
+    p3: ['赤','黃','蒼','赤','蒼','黃','赤','黃'],
+    p4: ['蒼','赤','黃','蒼','赤','蒼','黃','赤'],  // relentless final phase
   },
 };
 
@@ -176,6 +199,7 @@ const MONSTER_AI = {
       m.stance = pat[m.patternIdx % pat.length];
       m.patternIdx++;
       m.nextTarget = target.id;
+      m.rushMove2 = (m.stance === '赤');  // dash in on attack beats
     },
   },
 
@@ -197,28 +221,102 @@ const MONSTER_AI = {
     },
   },
 
+  splitter: {
+    decide(m, players, gs) {
+      const target = _balanced(m, players, gs.monsters);
+      if (!target) { m.stance = '移'; return; }
+      const pat = MONSTER_PATTERNS.splitter;
+      m.stance = pat[m.patternIdx % pat.length];
+      m.patternIdx++;
+      m.nextTarget = target.id;
+    },
+  },
+
+  splitter_mini: {
+    decide(m, players, gs) {
+      const target = _balanced(m, players, gs.monsters);
+      if (!target) { m.stance = '移'; return; }
+      const pat = MONSTER_PATTERNS.splitter_mini;
+      m.stance = pat[m.patternIdx % pat.length];
+      m.patternIdx++;
+      m.nextTarget = target.id;
+      m.rushMove2 = (m.stance === '赤');
+    },
+  },
+
+  mirror: {
+    decide(m, players, gs) {
+      const target = _balanced(m, players, gs.monsters);
+      if (!target) { m.stance = '移'; return; }
+      m.nextTarget = target.id;
+      // Use adaptive counter-stance if known; else start with 赤
+      m.stance = m.mirrorStance || '赤';
+    },
+  },
+
+  bomber: {
+    decide(m, players, gs) {
+      const target = _balanced(m, players, gs.monsters);
+      if (!target) { m.stance = '移'; return; }
+      const pat = MONSTER_PATTERNS.bomber;
+      m.stance = pat[m.patternIdx % pat.length];
+      m.patternIdx++;
+      m.nextTarget = target.id;
+    },
+  },
+
+  guardian: {
+    decide(m, players, gs) {
+      const target = _balanced(m, players, gs.monsters);
+      if (!target) { m.stance = '移'; return; }
+      const pat = MONSTER_PATTERNS.guardian;
+      m.stance = pat[m.patternIdx % pat.length];
+      m.patternIdx++;
+      m.nextTarget = target.id;
+    },
+  },
+
+  summoner: {
+    decide(m, players, gs) {
+      const target = _balanced(m, players, gs.monsters);
+      if (!target) { m.stance = '移'; return; }
+      const pat = MONSTER_PATTERNS.summoner;
+      m.stance = pat[m.patternIdx % pat.length];
+      m.patternIdx++;
+      m.nextTarget = target.id;
+    },
+  },
+
   boss: {
     decide(m, players, gs) {
       const tier = gs.bossTier || Math.round(gs.level / 9);
       const hpFrac = m.hp / m.maxHp;
       const now = Date.now();
-      const NAMES = ['試煉巡衛', '狂獵者', '深淵主宰'];
+      const NAMES = ['試煉巡衛', '狂獵者', '深淵主宰', '虛空之主'];
 
       if (!gs.bossPhase2 && hpFrac < 0.5) {
         gs.bossPhase2 = true;
         m.patternIdx = 0;
-        gs.beatMs = [580, 520, 520][tier-1];
+        gs.beatMs = [580, 520, 520, 500][tier-1];
         _msg(gs, `💀 ${NAMES[tier-1]} 進入第二形態！`, now);
       }
       if (tier >= 3 && !gs.bossPhase3 && hpFrac < 0.33) {
         gs.bossPhase3 = true;
         m.patternIdx = 0;
-        gs.beatMs = 430;
-        _msg(gs, '🔥 深淵主宰・終形態！全力阻止！', now);
+        gs.beatMs = tier >= 4 ? 420 : 430;
+        _msg(gs, tier >= 4 ? '🌌 虛空之主・虛空形態！' : '🔥 深淵主宰・終形態！全力阻止！', now);
+      }
+      if (tier >= 4 && !gs.bossPhase4 && hpFrac < 0.20) {
+        gs.bossPhase4 = true;
+        m.patternIdx = 0;
+        gs.beatMs = 340;
+        _msg(gs, '⚡ 虛空之主・絕對形態！', now);
       }
 
       const pats = BOSS_PATTERNS[tier] || BOSS_PATTERNS[1];
-      const pat = gs.bossPhase3 ? (pats.p3 || pats.p2) : gs.bossPhase2 ? pats.p2 : pats.p1;
+      const pat = gs.bossPhase4 ? (pats.p4 || pats.p3)
+                : gs.bossPhase3 ? (pats.p3 || pats.p2)
+                : gs.bossPhase2 ? pats.p2 : pats.p1;
       m.currentPat = pat;
       m.stance = pat[m.patternIdx % pat.length];
       m.patternIdx++;
@@ -229,7 +327,8 @@ const MONSTER_AI = {
       // Rush: boss2 P2 rushes on 赤/黃; boss3 P3 rushes on all attacks
       const isAtk = m.stance!=='移'&&m.stance!=='休'&&m.stance!=='閃'&&m.stance!=='全彈';
       m.rushMove2 = (tier===2 && gs.bossPhase2 && (m.stance==='赤'||m.stance==='黃'))
-                 || (tier>=3 && gs.bossPhase3 && isAtk);
+                 || (tier>=3 && gs.bossPhase3 && isAtk)
+                 || (tier>=4 && gs.bossPhase4 && isAtk);
     },
   },
 };
@@ -343,7 +442,7 @@ function getMapDimensions(params) {
   if (params.levelType === 'boss')   return { W: 26, H: 18 };
   if (params.levelType === 'rest')   return { W: 16, H: 6 };
   if (params.levelType === 'puzzle') return { W: 22, H: 6 };
-  return { W: Math.max(20, 8 + params.monsters * 4), H: 6 };
+  return { W: Math.min(48, Math.max(20, 8 + params.monsters * 4)), H: 6 };
 }
 
 // ── Map generation ────────────────────────────────────────────────────────────
@@ -432,8 +531,92 @@ function generatePuzzleRoom(W,H){
   return {grid,traps:[],exitX,exitY};
 }
 
-function _createPressurePlates(W,H){
-  return [{x:4,y:4,active:false},{x:Math.floor(W/2),y:Math.floor(H/2),active:false},{x:W-5,y:H-5,active:false}];
+function _createPressurePlates(W, H, playerCount) {
+  const n = Math.max(1, Math.min(playerCount || 1, 4));
+  const mid = Math.floor(H / 2);
+  const positions = [
+    { x: 3,              y: mid },    // far left
+    { x: W - 4,          y: mid },    // far right
+    { x: Math.floor(W/2), y: H - 2 }, // center bottom
+    { x: Math.floor(W/2), y: 1 },     // center top
+  ];
+  return positions.slice(0, n).map(p => ({ ...p, active: false }));
+}
+
+// ── Bomber helpers ────────────────────────────────────────────────────────────
+
+function _bomberExplode(gs, bomber, now) {
+  const dmg = Math.round(gs.monsterDmg * 2.8);
+  for (const p of Object.values(gs.players)) {
+    if (p.hp <= 0) continue;
+    if (dist(bomber.x, bomber.y, p.x, p.y) <= 2) {
+      p.hp = Math.max(0, p.hp - dmg);
+      _msg(gs, `💥 ${bomber.label} 爆炸！${p.name} -${dmg}HP`, now);
+    }
+  }
+  // Friendly-fire: splash nearby monsters
+  for (const m of gs.monsters) {
+    if (m.id === bomber.id || m.hp <= 0) continue;
+    if (dist(bomber.x, bomber.y, m.x, m.y) <= 1)
+      m.hp = Math.max(0, m.hp - Math.round(gs.monsterDmg * 1.5));
+  }
+  bomber.hp = 0;
+  _msg(gs, `💥 ${bomber.label} 自爆！`, now);
+}
+
+// ── Summoner helpers ──────────────────────────────────────────────────────────
+
+function _summonReinforcement(gs, summoner, now) {
+  if (gs.levelType === 'boss' || gs.levelType === 'rest') return;
+  if (gs.monsters.filter(m => m.hp > 0).length >= 14) return; // cap total enemies
+  const dirs = [[2,0],[-2,0],[0,2],[0,-2],[1,1],[-1,1],[1,-1],[-1,-1]];
+  for (const [dx,dy] of dirs) {
+    const nx = summoner.x + dx, ny = summoner.y + dy;
+    if (nx <= 0 || ny <= 0 || nx >= gs.W-1 || ny >= gs.H-1) continue;
+    if (gs.grid[ny]?.[nx] === TILE.WALL) continue;
+    if (gs.monsters.some(m => m.hp > 0 && m.x === nx && m.y === ny)) continue;
+    if (Object.values(gs.players).some(p => p.hp > 0 && p.x === nx && p.y === ny)) continue;
+    const idStart = gs.nextMonsterIdSeq ?? gs.monsters.length;
+    const params = getLevelParams(gs.level || 1);
+    const mini = _makeMonster(idStart, {x:nx, y:ny}, 'basic', params.baseHp);
+    gs.monsters.push(mini);
+    gs.nextMonsterIdSeq = idStart + 1;
+    _msg(gs, `📯 ${summoner.label} 召喚增援！`, now);
+    return;
+  }
+}
+
+// ── Splitter & Mirror helpers ─────────────────────────────────────────────────
+
+// What stance counters each player action (used by mirror to adapt)
+const COUNTER_OF = { '刺':'赤', '斬':'黃', '架':'蒼' };
+
+function _doSplit(gs, monster, now) {
+  monster.hasSplit = true;
+  const idStart = gs.nextMonsterIdSeq != null ? gs.nextMonsterIdSeq : gs.monsters.length;
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+  let placed = 0;
+  for (const [dx, dy] of dirs) {
+    if (placed >= 2) break;
+    const nx = monster.x + dx, ny = monster.y + dy;
+    if (nx <= 0 || ny <= 0 || nx >= gs.W-1 || ny >= gs.H-1) continue;
+    if (gs.grid[ny]?.[nx] === TILE.WALL) continue;
+    if (gs.monsters.some(m => m.hp > 0 && m.x === nx && m.y === ny)) continue;
+    if (Object.values(gs.players).some(p => p.hp > 0 && p.x === nx && p.y === ny)) continue;
+    // baseHp = monster.maxHp; splitter_mini.hpMult = 0.40 → mini gets 40% of original maxHp
+    const mini = _makeMonster(idStart + placed, {x:nx, y:ny}, 'splitter_mini', monster.maxHp);
+    gs.monsters.push(mini);
+    placed++;
+  }
+  gs.nextMonsterIdSeq = idStart + placed;
+  if (placed > 0) _msg(gs, `💢 ${monster.label} 分裂！`, now);
+}
+
+function _checkSplit(gs, monster, now) {
+  if (monster.monsterType === 'splitter' && !monster.hasSplit &&
+      monster.hp > 0 && monster.hp <= monster.maxHp * 0.5) {
+    _doSplit(gs, monster, now);
+  }
 }
 
 // ── Monster factory ───────────────────────────────────────────────────────────
@@ -447,7 +630,9 @@ function _makeMonster(id, pos, monsterType, baseHp) {
   return {id,monsterType,label:def.symbol+(id+1),x:pos.x,y:pos.y,hp,maxHp:hp,
     stance:null,nextTarget:null,rushMove2:false,slowUntil:0,
     vulnerable:0,stanceRevealUntil:0,stunTurns:0,stunned:false,rageTurns:0,
-    patternIdx:startIdx};
+    patternIdx:startIdx,
+    hasSplit:false, mirrorStance:null,
+    fuseBeats:4, summonCooldown:10};
 }
 
 function _spawnMonsters(grid,W,H,exitX,exitY,params,idStart){
@@ -511,7 +696,7 @@ function createGameState(players, level=1) {
     beat:0, turn:0, pendingActions:{},
     W,H,grid,traps,exitX,exitY,
     startTime:Date.now(), duration:params.timer*1000,
-    beatMs:params.beatMs||500,
+    beatMs:params.beatMs||500, _baseBeatMs:params.beatMs||500,
     monsterDmg:params.baseDmg, nextMonsterIdSeq:params.monsters,
     wave2Spawned:false, wave3Spawned:false,
     players:gamePlayers, monsters:_spawnMonsters(grid,W,H,exitX,exitY,params,0),
@@ -526,7 +711,7 @@ function createGameState(players, level=1) {
     gs.isRestRoom=true;
     _msg(gs,'🛌 休息室：體力緩慢恢復，前進出口！',Date.now());
   } else if(params.levelType==='puzzle'){
-    gs.pressurePlates=_createPressurePlates(W,H);
+    gs.pressurePlates=_createPressurePlates(W,H,players.length);
     gs.exitOpen=false;
     _msg(gs,'🧩 謎題室：同時踩上所有壓力板開啟出口！',Date.now());
   } else if(params.levelType==='boss'){
@@ -559,20 +744,27 @@ function nextLevel(gs){
   const spawnPts = params.levelType==='boss'
     ? [{x:2,y:2},{x:3,y:2},{x:2,y:3},{x:3,y:3}]
     : [{x:2,y:1},{x:2,y:2},{x:2,y:3},{x:2,y:4}];
+  const _isSolo = Object.keys(gs.players).length === 1;
   let i=0;
   for(const p of Object.values(gs.players)){
+    const sp=spawnPts[i++%spawnPts.length];
     if(p.hp>0){
-      const sp=spawnPts[i++%spawnPts.length];
       p.x=sp.x; p.y=sp.y; p.atExit=false; p.walls=[]; p.comboStreak=0;
-      // Rest room = full heal; boss/puzzle = 80%; normal = 70% (enough to keep going)
+      // Rest room = full heal; boss/puzzle = 80%; normal = 70%
       const healFrac=params.levelType==='rest'?1.0:params.levelType==='boss'?0.8:0.7;
       p.hp=Math.min(p.maxHp,Math.max(p.hp,Math.floor(p.maxHp*healFrac)));
+    } else if (!_isSolo) {
+      // Multiplayer revival: dead players come back at level start with reduced HP
+      p.x=sp.x; p.y=sp.y; p.atExit=false; p.walls=[]; p.comboStreak=0;
+      const reviveFrac=params.levelType==='rest'?1.0:0.30;
+      p.hp=Math.floor(p.maxHp*reviveFrac);
+      _msg(gs,`💫 ${p.name} 復活！${Math.round(reviveFrac*100)}% HP`,Date.now());
     }
   }
   gs.monsters=_spawnMonsters(gs.grid,gs.W,gs.H,gs.exitX,gs.exitY,params,0);
   gs.nextMonsterIdSeq=params.monsters;
   gs.monsterDmg=params.baseDmg; gs.startTime=Date.now(); gs.duration=params.timer*1000;
-  gs.beatMs=params.beatMs||500;
+  gs.beatMs=params.beatMs||500; gs._baseBeatMs=params.beatMs||500;
   gs.wave2Spawned=false; gs.wave3Spawned=false;
   gs.phase='playing'; gs.winner=null;
   gs.beat=0; gs.turn=0; gs.pendingActions={};
@@ -585,7 +777,7 @@ function nextLevel(gs){
   const typeLabel={boss:'【BOSS】',rest:'【休息室】',puzzle:'【謎題室】',normal:''};
   _msg(gs,`── 第 ${gs.level} 關 ${typeLabel[params.levelType]||''} 開始！──`,Date.now());
   if(params.levelType==='rest'){gs.isRestRoom=true;}
-  if(params.levelType==='puzzle'){gs.pressurePlates=_createPressurePlates(gs.W,gs.H);gs.exitOpen=false;}
+  if(params.levelType==='puzzle'){gs.pressurePlates=_createPressurePlates(gs.W,gs.H,Object.keys(gs.players).length);gs.exitOpen=false;}
   if(params.levelType==='boss'){gs.exitOpen=false;}
   if(params.levelType==='normal'){gs.exitOpen=false;}
 }
@@ -670,6 +862,42 @@ function startTurn(gs) {
   attackCandidates.sort((a,b)=>a.d-b.d);
   for(let i=0;i<attackCandidates.length;i++){
     if(i>=maxAttackers){ attackCandidates[i].m.stance='移'; attackCandidates[i].m.rushMove2=false; }
+  }
+
+  // Adjust this beat's speed to the primary attacker's personal rhythm.
+  // Each beat is independent — brute's slow beat doesn't bleed into runner's fast beat.
+  // Boss rooms manage their own beatMs via phase transitions.
+  if (gs.levelType !== 'boss') {
+    const primary = attackCandidates[0]?.m;
+    if (primary) {
+      const mult = MONSTER_DEFS[primary.monsterType]?.beatMult ?? 1.0;
+      gs.beatMs = Math.max(220, Math.min(900, Math.round((gs._baseBeatMs || BEAT_MS) * mult)));
+    } else {
+      gs.beatMs = gs._baseBeatMs || BEAT_MS;
+    }
+  }
+
+  // ── Bomber fuse countdown ─────────────────────────────────────────────────
+  const _now2 = Date.now();
+  for (const m of gs.monsters) {
+    if (m.monsterType !== 'bomber' || m.hp <= 0) continue;
+    const nearPlayer = Object.values(gs.players).some(p => p.hp > 0 && dist(m.x,m.y,p.x,p.y) <= 2);
+    if (nearPlayer) {
+      m.fuseBeats = (m.fuseBeats ?? 4) - 1;
+      if (m.fuseBeats <= 0) _bomberExplode(gs, m, _now2);
+    } else {
+      m.fuseBeats = Math.min(4, (m.fuseBeats ?? 4) + 1);
+    }
+  }
+
+  // ── Summoner periodic reinforcements ─────────────────────────────────────
+  for (const m of gs.monsters) {
+    if (m.monsterType !== 'summoner' || m.hp <= 0) continue;
+    m.summonCooldown = (m.summonCooldown ?? 10) - 1;
+    if (m.summonCooldown <= 0) {
+      m.summonCooldown = 10;
+      _summonReinforcement(gs, m, _now2);
+    }
   }
 }
 
@@ -799,7 +1027,24 @@ function _resolveMelee(player, monster, playerAction, gs, now) {
     const comboMult = player.comboStreak >= 4 ? 3.0
                     : player.comboStreak === 3  ? 2.0
                     : player.comboStreak === 2  ? 1.5 : 1.0;
-    const dmg    = Math.round(_playerDmg(player) * vuln * comboMult);
+    const dmg = Math.round(_playerDmg(player) * vuln * comboMult);
+
+    // Guardian intercept: adjacent Guardian absorbs the hit instead of the target
+    const guardian = gs.monsters.find(o =>
+      o.id !== monster.id && o.hp > 0 && o.monsterType === 'guardian' &&
+      dist(o.x, o.y, monster.x, monster.y) <= 1);
+    if (guardian) {
+      guardian.hp = Math.max(0, guardian.hp - dmg);
+      _checkSplit(gs, guardian, now);
+      monster.stunTurns = Math.max(monster.stunTurns, 1);
+      const healAmt = Math.round(_playerDmg(player) * 0.10);
+      player.hp = Math.min(player.maxHp, player.hp + healAmt);
+      _msg(gs, `🛡 ${guardian.label} 攔截！-${dmg}HP ${player.name}+${healAmt}HP`, now);
+      if (guardian.hp === 0) _msg(gs, `${guardian.label} 被擊倒！`, now);
+      gs.combatResults.push({ result:'win', mx:guardian.x, my:guardian.y, px:player.x, py:player.y });
+      return;
+    }
+
     const prevHp = monster.hp;
     monster.hp   = Math.max(0, monster.hp - dmg);
 
@@ -817,6 +1062,14 @@ function _resolveMelee(player, monster, playerAction, gs, now) {
       }
     }
 
+    // Brief stun on successful counter — brute gets 2 beats, others 1
+    const stunOnWin = monster.monsterType === 'brute' ? 2 : 1;
+    monster.stunTurns = Math.max(monster.stunTurns, stunOnWin);
+    // Mirror remembers player's action and adapts next stance
+    if (monster.monsterType === 'mirror' && playerAction)
+      monster.mirrorStance = COUNTER_OF[playerAction] || '赤';
+    // Splitter split check
+    _checkSplit(gs, monster, now);
     const healAmt   = Math.round(_playerDmg(player) * 0.15);
     player.hp = Math.min(player.maxHp, player.hp + healAmt);
     const comboNote = player.comboStreak >= 2 ? ` [×${comboMult}連擊]` : '';
@@ -829,6 +1082,7 @@ function _resolveMelee(player, monster, playerAction, gs, now) {
     const mdmg = Math.round(mDmg * 0.5);
     monster.hp = Math.max(0, monster.hp - pdmg);
     player.hp  = Math.max(0, player.hp  - mdmg);
+    _checkSplit(gs, monster, now);
     _msg(gs, `⚡ ${player.name} 與 ${monster.label} 互相攻擊！`, now);
 
   } else {
@@ -837,7 +1091,7 @@ function _resolveMelee(player, monster, playerAction, gs, now) {
     const finalDmg = Math.round(mDmg * rageMult);
     player.hp = Math.max(0, player.hp - finalDmg);
     monster.rageTurns = 3;
-    monster.stunTurns = 3;
+    monster.stunTurns = Math.max(monster.stunTurns, 1); // 1 beat recovery, then rages for 2 beats
     _msg(gs, `✗ ${player.name} 被 ${monster.label}（${monster.stance}）擊中！-${finalDmg}HP${rageMult > 1 ? ' ⚡狂暴！' : ''}`, now);
   }
 }
@@ -887,6 +1141,8 @@ function _resolveScholarGuard(player, monster, gs, now) {
     const dmg=Math.round(15*vuln);
     monster.hp=Math.max(0,monster.hp-dmg);
     monster.vulnerable=8;
+    monster.stunTurns=Math.max(monster.stunTurns,2);
+    _checkSplit(gs, monster, now);
     // Scholar guard heal
     const healAmt=Math.round(player.maxHp*0.08);
     player.hp=Math.min(player.maxHp,player.hp+healAmt);
@@ -903,7 +1159,7 @@ function _resolveScholarGuard(player, monster, gs, now) {
     const finalDmg=Math.round(mDmg*rageMult);
     player.hp=Math.max(0,player.hp-finalDmg);
     monster.rageTurns=3;
-    monster.stunTurns=3;
+    monster.stunTurns=Math.max(monster.stunTurns,1);
     _msg(gs,`✗ ${player.name} 學者格擋失敗！-${finalDmg}HP${rageMult>1?' ⚡狂暴！':''}`,now);
   }
 }
@@ -964,13 +1220,13 @@ function _playerInCombat(gs, player) {
 }
 
 // Instant free-move: only works when no monster is within COMBAT_RANGE.
-// Returns true if the move was applied immediately.
+// Returns true if moved, 'combat' if player is in combat (caller should queue), false on cooldown/invalid.
 const FREE_MOVE_COOLDOWN = 200; // ms between free steps (~5 tiles/sec)
 function movePlayerFree(gs, playerId, dx, dy) {
   const p = gs.players[playerId];
   if (!p || p.hp <= 0) return false;
   if (!dx && !dy) return false;
-  if (_playerInCombat(gs, p)) return false;
+  if (_playerInCombat(gs, p)) return 'combat';
   const now = Date.now();
   if (now - (p.lastFreeMove || 0) < FREE_MOVE_COOLDOWN) return false;
   p.lastFreeMove = now;
@@ -1146,6 +1402,7 @@ function _monsterSnap(m, showStance, peekAhead=0) {
     enraged:(m.rageTurns||0)>0,
     nextSteps,
     patternIdx: m.patternIdx,
+    fuseBeats: m.monsterType==='bomber' ? (m.fuseBeats??4) : undefined,
   };
 }
 
@@ -1187,7 +1444,7 @@ function filterStateForRole(gs, role, playerId) {
     timeLeft:Math.max(0,gs.startTime+gs.duration-now),
     players:playerSnap, pings:gs.pings, messages:gs.messages,
     W:gs.W, H:gs.H, projectiles:liveProj,
-    windmillArms:[], bossPhase2:gs.bossPhase2||false, bossPhase3:gs.bossPhase3||false, bossTier:gs.bossTier||0,
+    windmillArms:[], bossPhase2:gs.bossPhase2||false, bossPhase3:gs.bossPhase3||false, bossPhase4:gs.bossPhase4||false, bossTier:gs.bossTier||0,
     pressurePlates:gs.pressurePlates||null, exitOpen:gs.exitOpen, isRestRoom:gs.isRestRoom||false,
     myAction:gs.pendingActions[playerId]||null,
     combatResults:gs.combatResults||[], combatResultTs:gs.combatResultTs||0,

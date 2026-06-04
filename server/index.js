@@ -90,7 +90,7 @@ function startGameTicks(code) {
     if (result) { handleResult(code, result, gs); return; }
     startTurn(gs);
 
-    io.to(code).emit('beat', { beat: gs.beat, turn: gs.turn });
+    io.to(code).emit('beat', { beat: gs.beat, turn: gs.turn, beatMs: gs.beatMs });
   }, 80);
 
   roomTimers.set(code, { broadcast, beat });
@@ -155,9 +155,11 @@ io.on('connection', (socket) => {
     const code = socket.data.code;
     const gs   = gameStates.get(code);
     if (!gs || gs.phase !== 'playing') return;
-    // Out-of-combat: pure movement request → apply instantly, skip beat queue
+    // Pure movement (no action): try instant free-move.
+    // Returns true=moved, 'combat'=in combat (queue for beat), false=cooldown/invalid (discard).
     if (!combatAction && !targetId) {
-      if (movePlayerFree(gs, socket.id, dx || 0, dy || 0)) return;
+      const moved = movePlayerFree(gs, socket.id, dx || 0, dy || 0);
+      if (moved !== 'combat') return;   // instant move OR discard — never double-queue
     }
     submitPlayerAction(gs, socket.id, dx, dy, combatAction, targetId ?? null);
   });
