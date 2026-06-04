@@ -811,7 +811,6 @@ function startTurn(gs) {
   gs.resolvedThisTurn=false;
   gs.combatResults=[];
   gs.combatResultTs=Date.now();
-  gs.foolEffectId=null;          // clear each beat so overlay doesn't linger
 
   if(gs.isRestRoom){ _tickRest(gs); return; }
   if(gs.pressurePlates) _tickPuzzle(gs);
@@ -936,6 +935,7 @@ function startTurn(gs) {
 function resolveTurn(gs) {
   if(gs.resolvedThisTurn) return;
   gs.resolvedThisTurn=true;
+  gs.foolEffectId=null; // clear previous beat's effect before new combat
 
   const now=Date.now();
   const alivePlayers=Object.values(gs.players).filter(p=>p.hp>0);
@@ -1437,30 +1437,30 @@ function placeDecoy(gs, playerId, x, y) {
   return true;
 }
 
-// Activate H-key skill for the player's role
+// Activate H-key skill — always uses PRIMARY role, bonusRoles don't grant active skills
 function activateSkill(gs, playerId, extra) {
   const p = gs.players[playerId];
   if(!p||p.hp<=0) return false;
   const now=Date.now();
-  const roles=[p.role,...(p.bonusRoles||[])];
+  const role = p.role; // primary role only
 
   // Architect decoy — needs position from extra
-  if(roles.includes('architect') && extra?.x!=null) {
+  if(role==='architect' && extra?.x!=null) {
     return placeDecoy(gs, playerId, extra.x, extra.y);
   }
 
   if(now-(p.lastSpecial||0) < _skillCdForPlayer(p)) return false;
 
-  if(roles.includes('fighter')&&!p.taunting){
+  if(role==='fighter'&&!p.taunting){
     p.taunting=true; p.tauntBeatsLeft=3; p.lastSpecial=now;
     _msg(gs,`⚔ ${p.name} 發動嘲諷！怪物全部轉向！`,now); return true;
   }
-  if(roles.includes('scholar')&&!(gs.scholarSlowBeats>0)){
+  if(role==='scholar'&&!(gs.scholarSlowBeats>0)){
     gs.scholarSlowBeats=2; p.lastSpecial=now;
     _msg(gs,`🕐 ${p.name} 發動節律震盪！節拍減速！`,now); return true;
   }
-  if(roles.includes('fool')){
-    if(p.hp<=20) return false; // not enough HP
+  if(role==='fool'){
+    if(p.hp<=20) return false;
     p.hp-=20; p.lastSpecial=now;
     for(let i=0;i<3;i++) _applyFoolEffect(gs, _pickFoolEffect(['good','vfx']), now);
     _msg(gs,`🎴 ${p.name} 獻祭！觸發3個效果！`,now); return true;
@@ -1469,12 +1469,13 @@ function activateSkill(gs, playerId, extra) {
 }
 
 function _skillCdForPlayer(p) {
-  const roles=[p.role,...(p.bonusRoles||[])];
-  if(roles.includes('fighter')) return CONFIG.CD.FIGHTER_TAUNT;
-  if(roles.includes('scholar')) return CONFIG.CD.SCHOLAR_SLOW;
-  if(roles.includes('architect')) return CONFIG.CD.ARCHITECT_DECOY;
-  if(roles.includes('fool')) return CONFIG.CD.FOOL_SACRIFICE;
-  return 99999;
+  switch(p.role) {
+    case 'fighter':   return CONFIG.CD.FIGHTER_TAUNT;
+    case 'scholar':   return CONFIG.CD.SCHOLAR_SLOW;
+    case 'architect': return CONFIG.CD.ARCHITECT_DECOY;
+    case 'fool':      return CONFIG.CD.FOOL_SACRIFICE;
+    default:          return 99999;
+  }
 }
 
 function quickMsg(gs, playerId, text) {
