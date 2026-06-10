@@ -1,8 +1,12 @@
 node_modules/
 .local/
 .config/
+.ssh/
 .bash*
 .zsh*
 .profile
 .zprofile
+.gitconfig
+.claude.json
+.claude/
 *.log
