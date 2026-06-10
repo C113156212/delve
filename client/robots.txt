@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://delve-08.duckdns.org/sitemap.xml
