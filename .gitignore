@@ -10,3 +10,4 @@ node_modules/
 .claude.json
 .claude/
 *.log
+.cache/

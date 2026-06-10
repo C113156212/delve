@@ -1,8 +1,6 @@
 'use strict';
-const express    = require('express');
 const http       = require('http');
 const { Server } = require('socket.io');
-const path       = require('path');
 
 const { createRoom, joinRoom, pickRole, canStart, getRoom, setPhase, removePlayer } = require('./rooms');
 const {
@@ -12,16 +10,9 @@ const {
   checkEndConditions, filterStateForRole,
 } = require('./game');
 
-const app    = express();
-const server = http.createServer(app);
+const server = http.createServer();
 const ORIGIN = process.env.CORS_ORIGIN || '*';
 const io     = new Server(server, { cors: { origin: ORIGIN } });
-
-app.use(express.static(path.join(__dirname, '../client')));
-app.get('/', (req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.sendFile(path.join(__dirname, '../client/index.html'));
-});
 
 // ── Online count ──────────────────────────────────────────────────────────────
 let onlineCount = 0;
@@ -281,29 +272,6 @@ io.on('connection', (socket) => {
       '用架！','用刺！','用斬！','閃開！',
     ];
     if (allowed.includes(text)) { quickMsg(gs, socket.id, text); gs.lastChangeAt = Date.now(); }
-  });
-
-  // ── Debug cheats ──────────────────────────────────────────────────────────
-
-  socket.on('debug_cheat', ({ cmd, val }) => {
-    const code = socket.data.code;
-    const gs   = gameStates.get(code);
-    if (!gs || gs.phase !== 'playing') return;
-    if (cmd === 'next_level') {
-      for (const p of Object.values(gs.players)) if (p.hp > 0) p.atExit = true;
-      handleResult(code, checkEndConditions(gs), gs);
-    } else if (cmd === 'kill_monsters') {
-      for (const m of gs.monsters) m.hp = 0;
-      gs.lastChangeAt = Date.now();
-    } else if (cmd === 'full_hp') {
-      for (const p of Object.values(gs.players)) p.hp = p.maxHp;
-      gs.lastChangeAt = Date.now();
-    } else if (cmd === 'goto_level') {
-      const target = Math.max(1, Math.min(Number(val) || 1, MAX_LEVEL));
-      gs.level = target - 1;
-      for (const p of Object.values(gs.players)) if (p.hp > 0) p.atExit = true;
-      handleResult(code, checkEndConditions(gs), gs);
-    }
   });
 
   // ── Disconnect ────────────────────────────────────────────────────────────

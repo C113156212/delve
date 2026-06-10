@@ -7,7 +7,6 @@ RUN npm install --omit=dev
 
 COPY shared/ ./shared/
 COPY server/ ./server/
-COPY client/ ./client/
 
 ENV PORT=3000
 
